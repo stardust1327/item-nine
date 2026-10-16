@@ -213,8 +213,9 @@ Displayed numbers are truncated, so they never round across a tier threshold.
 
 - **Stages:** preflight (Gemini key) → ingest (`schedules`, `pbp` only) → features → optional backtest → model → report.
   Each stage reads what the previous one wrote. A failed stage stops the run; a degraded stage does not.
-- **Target week:** `model.resolve_week`. The default is the current week: the earliest week of the season in progress
-  (by the run's clock) with a game yet to kick off. `--week` may name a past week (a replay); a later week is an error.
+- **Target week:** `model.resolve_week`. The default is the current week: the earliest week, in the season of the next
+  game to kick off (by the run's clock), that still has a game yet to kick off. In the days before the opener this is
+  already week 1 of the new season. `--week` may name a past week (a replay); a later week is an error.
 - **Latest-run files** (`current_week.json`, `weekly_report_enriched.json`) are written only for the current week. Every
   run writes the week's archives and newsletter, so a replay never replaces the latest predictions.
 - **Live odds** are requested only for the current week and only without `--use-cached-odds`, at most one pull (2

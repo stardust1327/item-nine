@@ -673,13 +673,18 @@ def current_week_games(schedules: pl.DataFrame, now: datetime | None = None, sea
     """All games of the current NFL week, with ``kickoff_utc``.
 
     The current week is the earliest week that still has a game yet to kick off,
-    so on Monday night (MNF in progress) it is already next week. Empty when the
-    season is over.
+    so on Monday night (MNF in progress) it is already next week. Without
+    ``season``, it belongs to the season of the next game to kick off, so in the
+    days before the opener it is already week 1 of the new season (which
+    nflreadpy only counts as current from the Thursday after Labor Day). Empty
+    when no game is upcoming.
     """
     now = now or utc_now()
-    season = season if season is not None else current_season(now)
+    upcoming = add_kickoff_utc(schedules).filter(pl.col("result").is_null() & (pl.col("kickoff_utc") > now))
+    if season is None:
+        season = int(upcoming.sort("kickoff_utc")["season"][0]) if upcoming.height else current_season(now)
     games = add_kickoff_utc(schedules.filter(pl.col("season") == season))
-    upcoming = games.filter(pl.col("result").is_null() & (pl.col("kickoff_utc") > now))
+    upcoming = upcoming.filter(pl.col("season") == season)
     if upcoming.is_empty():
         return games.clear()
     week = upcoming["week"].min()

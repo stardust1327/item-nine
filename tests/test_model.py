@@ -19,6 +19,7 @@ from src import features as F
 from src import ingest
 from src import model as M
 from tests import fakes
+from tests.conftest import make_frame
 
 NOW = datetime(2026, 10, 16, 18, 0, tzinfo=UTC)
 
@@ -616,6 +617,25 @@ def test_resolve_week_replays_past_weeks_and_rejects_future_ones(nflverse_schedu
 
 
 def test_resolve_week_season_follows_now_not_the_wall_clock(nflverse_schedules):
-    """A pinned `now` picks its own season, so replays and tests don't depend on today's date."""
-    with pytest.raises(M.ModelError, match="the 2025 season has no upcoming games"):
-        M.resolve_week(nflverse_schedules, datetime(2026, 9, 1, tzinfo=UTC))  # before the 2026 season starts
+    """With nothing upcoming, the default season comes from the pinned `now`, not today's date."""
+    with pytest.raises(M.ModelError, match="no 2027 games in the cached schedules"):
+        M.resolve_week(nflverse_schedules, datetime(2027, 10, 1, tzinfo=UTC))
+
+
+def test_week_before_the_opener_is_week_1_of_the_new_season():
+    """Regression: before the Thursday after Labor Day nflreadpy still reports the old season, which has no upcoming
+    games, so the default run failed instead of predicting week 1 (and live odds found no games to match)."""
+    features, moneylines = make_frame(upcoming=(2026, 1))  # 2026 has only week 1, not yet played (Sun Sep 13)
+    schedules = fakes.nflverse_schedules(features, moneylines)
+    tuesday = datetime(2026, 9, 8, 18, tzinfo=UTC)  # nflreadpy's 2026 season starts Thu Sep 10
+    assert ingest.current_season(tuesday) == 2025
+
+    week_games = ingest.current_week_games(schedules, tuesday)
+    assert set(week_games["season"]) == {2026} and set(week_games["week"]) == {1} and week_games.height == 8
+    target = M.resolve_week(schedules, tuesday)
+    assert (target.season, target.week, target.is_current) == (2026, 1, True)
+    payload = M.predict_week(features, schedules, M.nflverse_market_probs(schedules), season=2026, week=1, now=tuesday)
+    assert payload["model"]["calibration_season"] == 2025 and len(payload["games"]) == 8
+
+    replay = M.resolve_week(schedules, tuesday, season=2025, week=18)  # explicit replays are unaffected
+    assert (replay.season, replay.week, replay.is_current) == (2025, 18, False)

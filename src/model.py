@@ -1365,11 +1365,15 @@ def resolve_week(
 ) -> WeekTarget:
     """Pick the week to predict: the current week by default, or a given past or current week.
 
-    ``season`` defaults to the season in progress and ``week`` to that season's current week. A week after the
-    current one is rejected: its features would repeat the current week's and no market has priced it yet.
+    ``season`` defaults to the season of the next game to kick off (so the week before the opener is already week 1
+    of the new season), or to the season in progress at ``now`` when no game is upcoming. ``week`` defaults to that
+    season's current week. A week after the current one is rejected: its features would repeat the current week's
+    and no market has priced it yet.
     """
     now = _as_utc(now)
-    season = season if season is not None else ingest.current_season(now)
+    if season is None:
+        upcoming = ingest.current_week_games(schedules, now)
+        season = int(upcoming["season"][0]) if upcoming.height else ingest.current_season(now)
     games = add_kickoff_if_missing(schedules.filter(pl.col("season") == season))
     if games.is_empty():
         raise ModelError(f"no {season} games in the cached schedules")
