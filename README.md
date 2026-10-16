@@ -4,7 +4,7 @@ NFL Game Prediction Engine and Weekly Scouting Report web app (Python 3.11+).
 
 ## Project layout
 
-Implemented so far: `config.py`, `src/ingest.py` and `tests/test_ingest.py`. Everything else in the tree below is the planned layout.
+Implemented so far: `config.py`, `src/ingest.py`, `src/features.py` and their tests. Everything else in the tree below is the planned layout.
 
 ```
 item-nine/
@@ -14,12 +14,7 @@ item-nine/
 ├── .env.example               # ODDS_API_KEY and optional overrides
 ├── src/
 │   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache)
-│   ├── features/
-│   │   ├── team_efficiency.py # EPA/play, success rate, early-down pass rate; decayed rolling windows
-│   │   ├── qb.py              # QB-adjusted EPA, starter changes
-│   │   ├── injuries.py        # weighted availability from injury reports + weekly rosters
-│   │   ├── situational.py     # rest, travel, roof/surface, divisional, primetime
-│   │   └── build.py           # game-level matrix, strictly as-of kickoff (no leakage)
+│   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
 │   ├── models/
 │   │   ├── train.py           # XGBoost, walk-forward CV by season/week
 │   │   ├── calibrate.py       # isotonic / Platt on out-of-fold predictions
@@ -52,6 +47,7 @@ cp .env.example .env               # add ODDS_API_KEY
 python -m src.ingest               # first run downloads 2016-current (~30s, ~135 MB)
 python -m src.ingest               # later runs only refresh what is stale
 python -m src.ingest --odds        # also pull current-week consensus market odds
+python -m src.features             # build data/processed/features.parquet (<1s)
 python -m pytest
 ```
 
@@ -79,3 +75,16 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
 - Books are combined with the median (configurable), and the result is renormalized so home + away = 1.
 - Games without a moneyline fall back to a win probability implied by the spread, using Normal(μ, σ = 13.45).
 - Every pull is saved to `data/raw/odds/` for closing-line-value analysis.
+
+## Feature matrix
+
+`src/features.py` writes one row per scheduled game, both played and upcoming, to `data/processed/features.parquet`. Columns are grouped as `ID_COLUMNS`, `FEATURE_COLUMNS` (model inputs, all known before kickoff), `REFERENCE_COLUMNS` (the closing spread, used only for benchmarking) and `LABEL_COLUMNS`.
+
+- **Garbage time.** 4th-quarter plays with offense win probability below 5% or above 95% are dropped before any metric is computed.
+- **Team-game metrics.** Offensive pass and rush EPA per play, defensive pass and rush EPA allowed per play, offensive early-down success rate, and the starting QB's CPOE.
+- **No leakage.** Each team's EWMA (half-life 4 games) is computed within its season, then forward-filled and shifted by one game. A week N game only sees weeks 1 through N-1.
+- **Prior regression.** In weeks 1-4, each metric blends the team's play-weighted season Y-1 value with the in-season EWMA. The prior gets 100% of the weight in week 1, 25 points less each week, and none from week 5. The first cached season (2016) has no prior, so start training at 2017.
+- **Matchups.** Net pass and rush EPA mismatch (offense vs. the opposing defense), differences in early-down success rate and QB CPOE, net rest days, and divisional, neutral-site, outdoor and high-wind (15+ mph) flags.
+- **Unknowns stay null.** nflverse fills in wind only after kickoff, and retractable-roof status isn't known before game day. Upcoming games keep those flags null unless you pass a wind forecast through `build_game_features(..., weather=...)`.
+
+`tests/test_leakage.py` changes a game's own play-by-play and final score and asserts its features don't move. It also rebuilds every game from data cut off at that game's kickoff and asserts the result matches the full build.
