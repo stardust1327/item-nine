@@ -218,6 +218,10 @@ class Settings:
     def odds_dir(self) -> Path:
         return self.raw_dir / "odds"
 
+    @property
+    def features_path(self) -> Path:
+        return self.processed_dir / "features.parquet"
+
     def dataset_dir(self, name: str) -> Path:
         return self.raw_dir / name
 
