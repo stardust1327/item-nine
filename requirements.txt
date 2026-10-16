@@ -1,0 +1,18 @@
+# Data
+nflreadpy>=0.1.5
+polars>=1.30
+pyarrow>=16.0
+pandas>=2.2
+requests>=2.32
+python-dotenv>=1.0
+
+# Modeling
+xgboost>=2.1
+scikit-learn>=1.5
+
+# App
+streamlit>=1.40
+
+# Dev
+pytest>=8.0
+ruff>=0.6
