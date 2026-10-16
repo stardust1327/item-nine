@@ -53,7 +53,7 @@ import polars as pl
 import xgboost as xgb
 from scipy.optimize import minimize
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from xgboost import XGBClassifier
 
 from config import Settings, settings, setup_logging
@@ -92,15 +92,27 @@ MIN_BLEND_GAMES: Final[int] = 100  # fewer validation games with a market line -
 
 Tier = Literal["LOCK", "VALUE EDGE", "LEAN", "COIN FLIP"]
 TIERS: Final[tuple[str, ...]] = ("LOCK", "VALUE EDGE", "LEAN", "COIN FLIP")
-LOCK_MIN_WIN_PROB: Final[float] = 0.75  # final win probability of the pick
-VALUE_EDGE_MIN_PCT: Final[float] = 5.0  # |model - market| in percentage points
+LOCK_MIN_WIN_PROB: Final[float] = 0.75  # final win probability of the pick (and the model must favour it too)
+VALUE_EDGE_MIN_PCT: Final[float] = 5.0  # model above market on the pick side, in percentage points
 LEAN_MIN_WIN_PROB: Final[float] = 0.55
 TOP_DRIVERS: Final[int] = 3
 
+# Model-input values for venue flags that are unknown before kickoff. nflverse only
+# fills `wind` after the game, and a retractable roof's state is decided on game day,
+# so every upcoming game would otherwise reach XGBoost as "missing". That branch was
+# learned from historical data gaps (91 of 174 null-wind outdoor games are 2022), not
+# from a pre-game state. The same values are applied in training and serving so both
+# see one consistent definition: unknown wind -> no high wind (11% base rate), unknown
+# roof -> closed (~85% of historical retractable games). Raw nulls remain in
+# features.parquet; drivers are reported only for observed values.
+MODEL_INPUT_DEFAULTS: Final[dict[str, float]] = {"is_outdoor": 0.0, "is_high_wind_outdoor": 0.0}
+
 CONTRACT_NAME: Final[str] = "B"
-CONTRACT_VERSION: Final[str] = "1.0.0"
+CONTRACT_VERSION: Final[str] = "1.1.0"
 GAME_STATUSES: Final[tuple[str, ...]] = ("scheduled", "in_progress", "final")
-MARKET_SOURCES: Final[tuple[str, ...]] = ("odds_api", "odds_api_snapshot", "nflverse_close")
+# nflverse_close: line for a game that has kicked off; nflverse_line: pre-game line as last fetched.
+MARKET_SOURCES: Final[tuple[str, ...]] = ("odds_api", "odds_api_snapshot", "nflverse_close", "nflverse_line")
+MARKET_METHODS: Final[tuple[str, ...]] = ("h2h", "spread_implied", "nflverse_moneyline")
 
 _METRIC_LABELS: Final[dict[str, str]] = {
     "off_pass_epa": "offense EPA per dropback",
@@ -158,6 +170,7 @@ def nflverse_market_probs(schedules: pl.DataFrame) -> pl.DataFrame:
         (-pl.col("spread_line").cast(pl.Float64)).alias("market_home_spread"),
     ).with_columns(
         pl.when(pl.col("market_home_wp").is_not_null()).then(pl.lit("nflverse_close")).alias("market_source"),
+        pl.when(pl.col("market_home_wp").is_not_null()).then(pl.lit("nflverse_moneyline")).alias("market_method"),
         pl.lit(None, pl.UInt32).alias("market_books"),
         pl.lit(None, pl.Datetime("us", "UTC")).alias("market_as_of"),
     )
@@ -172,9 +185,21 @@ def labeled_rows(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.filter(pl.col("home_win").is_not_null() & has_team_signal)
 
 
-def to_matrix(frame: pl.DataFrame, columns: Sequence[str] = F.FEATURE_COLUMNS) -> np.ndarray:
-    """Float64 design matrix; nulls become NaN, which XGBoost treats as missing."""
-    return frame.select(pl.col(c).cast(pl.Float64) for c in columns).to_numpy()
+def to_matrix(frame: pl.DataFrame, columns: Sequence[str] = F.FEATURE_COLUMNS, *, raw: bool = False) -> np.ndarray:
+    """Float64 design matrix for the model.
+
+    Pre-game-unknown venue flags take :data:`MODEL_INPUT_DEFAULTS`, the same in
+    training and serving. Any other null becomes NaN, which XGBoost treats as
+    missing. ``raw=True`` skips the defaults (used to tell observed values from
+    imputed ones).
+    """
+    exprs = []
+    for c in columns:
+        expr = pl.col(c).cast(pl.Float64)
+        if not raw and c in MODEL_INPUT_DEFAULTS:
+            expr = expr.fill_null(MODEL_INPUT_DEFAULTS[c])
+        exprs.append(expr)
+    return frame.select(exprs).to_numpy()
 
 
 def _column(frame: pl.DataFrame, name: str) -> np.ndarray:
@@ -351,11 +376,10 @@ def probability_metrics(y: np.ndarray, p: np.ndarray) -> dict[str, float | int |
     p = np.asarray(p, dtype=float)
     if len(y) == 0:
         return {"n_games": 0, "brier": None, "log_loss": None, "accuracy": None, "auc": None, "ece": None}
-    clipped = np.clip(p, 1e-6, 1 - 1e-6)
     return {
         "n_games": len(y),
-        "brier": float(np.mean((p - y) ** 2)),
-        "log_loss": float(-np.mean(y * np.log(clipped) + (1 - y) * np.log(1 - clipped))),
+        "brier": float(brier_score_loss(y, p, pos_label=1)),
+        "log_loss": float(log_loss(y, np.clip(p, 1e-6, 1 - 1e-6), labels=[0, 1])),
         "accuracy": float(np.mean((p >= 0.5) == (y == 1))),
         "auc": float(roc_auc_score(y, p)) if np.unique(y).size == 2 else None,
         "ece": expected_calibration_error(y, p),
@@ -368,6 +392,20 @@ def blend_probabilities(model_p: np.ndarray, market_p: np.ndarray, market_weight
     market_p = np.asarray(market_p, dtype=float)
     blended = market_weight * market_p + (1.0 - market_weight) * model_p
     return np.where(np.isfinite(market_p), blended, model_p)
+
+
+def compare_probabilities(
+    y: np.ndarray, model_p: np.ndarray, market_p: np.ndarray, final_p: np.ndarray
+) -> dict[str, dict[str, float | int | None]]:
+    """Model, market and final metrics on the same games (those with a market line), plus all-games variants."""
+    has_market = np.isfinite(market_p)
+    return {
+        "model": probability_metrics(y[has_market], model_p[has_market]),
+        "market": probability_metrics(y[has_market], market_p[has_market]),
+        "final": probability_metrics(y[has_market], final_p[has_market]),
+        "model_all_games": probability_metrics(y, model_p),
+        "final_all_games": probability_metrics(y, final_p),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,12 +482,8 @@ def fit_fold(data: pl.DataFrame, split: SeasonSplit, *, random_state: int = RAND
     market = _column(calibration, "market_home_wp")
     y = _labels(calibration)
     blend = fit_market_weight(crossfit, market, y)
-    has_market = np.isfinite(market)
-    validation = {
-        "model": probability_metrics(y[has_market], crossfit[has_market]),
-        "market": probability_metrics(y[has_market], market[has_market]),
-        "final": probability_metrics(y, blend_probabilities(crossfit, market, blend.weight)),
-    }
+    # In-sample for the market weight (fit on these games); the calibration step is cross-fitted.
+    validation = compare_probabilities(y, crossfit, market, blend_probabilities(crossfit, market, blend.weight))
     logger.info(
         "%s: %d train / %d calibration games, market weight %.3f (%s)",
         split.describe(),
@@ -479,9 +513,9 @@ def walk_forward_backtest(
 ) -> BacktestResult:
     """Score every eligible season out of sample with the production recipe.
 
-    ``frame`` is the feature matrix joined with ``market_home_wp``. Metrics for
-    model, market and final are compared on the games that have a market line;
-    ``model_all_games`` also covers games without one.
+    ``frame`` is the feature matrix joined with ``market_home_wp``. ``model``,
+    ``market`` and ``final`` are scored on the same games (those with a market
+    line); ``*_all_games`` also cover games without one.
     """
     data = labeled_rows(frame)
     splits = walk_forward_splits(
@@ -499,13 +533,7 @@ def walk_forward_backtest(
         market_p = _column(test, "market_home_wp")
         final_p = blend_probabilities(model_p, market_p, fold.blend.weight)
         y = _labels(test)
-        has_market = np.isfinite(market_p)
-        metrics = {
-            "model": probability_metrics(y[has_market], model_p[has_market]),
-            "market": probability_metrics(y[has_market], market_p[has_market]),
-            "final": probability_metrics(y, final_p),
-            "model_all_games": probability_metrics(y, model_p),
-        }
+        metrics = compare_probabilities(y, model_p, market_p, final_p)
         folds.append(
             {
                 "test_season": split.test_season,
@@ -522,7 +550,7 @@ def walk_forward_backtest(
             split.test_season,
             metrics["model"]["brier"] or float("nan"),
             metrics["market"]["brier"] or float("nan"),
-            metrics["final"]["brier"],
+            metrics["final"]["brier"] or float("nan"),
             len(y),
         )
         predictions.append(
@@ -538,18 +566,13 @@ def walk_forward_backtest(
     y = oos["home_win"].cast(pl.Int64).to_numpy()
     model_p, final_p = oos["model_home_wp"].to_numpy(), oos["final_home_wp"].to_numpy()
     market_p = oos["market_home_wp"].cast(pl.Float64).fill_null(float("nan")).to_numpy()
-    has_market = np.isfinite(market_p)
     report = {
         "generated_at": _iso(datetime.now(UTC)),
         "algorithm": _algorithm_description(),
         "hyperparameters": dict(XGB_PARAMS),
         "test_seasons": [s.test_season for s in splits],
         "folds": folds,
-        "pooled": {
-            "model": probability_metrics(y[has_market], model_p[has_market]),
-            "market": probability_metrics(y[has_market], market_p[has_market]),
-            "final": probability_metrics(y, final_p),
-        },
+        "pooled": compare_probabilities(y, model_p, market_p, final_p),
     }
     return BacktestResult(oos, report)
 
@@ -562,26 +585,68 @@ _MARKET_COLUMNS: Final[dict[str, Any]] = {
     "market_home_wp": pl.Float64,
     "market_home_spread": pl.Float64,
     "market_source": pl.String,
+    "market_method": pl.String,
     "market_books": pl.UInt32,
     "market_as_of": pl.Datetime("us", "UTC"),
 }
 
 
 def _normalize_market(df: pl.DataFrame) -> pl.DataFrame:
-    return df.select(pl.col(name).cast(dtype) for name, dtype in _MARKET_COLUMNS.items())
+    """Select/cast :data:`_MARKET_COLUMNS`; absent optional columns become null."""
+    return df.select(
+        (pl.col(name) if name in df.columns else pl.lit(None)).cast(dtype).alias(name)
+        for name, dtype in _MARKET_COLUMNS.items()
+    )
 
 
 def _odds_consensus_to_market(consensus: pl.DataFrame, source: str) -> pl.DataFrame:
+    """Odds API consensus rows -> market columns. Spread-only games report the spread books and method."""
+    if "wp_source" not in consensus.columns:  # frames written before spread-only pricing was tracked
+        consensus = consensus.with_columns(
+            pl.lit("h2h").alias("wp_source"), pl.lit(None, pl.UInt32).alias("n_books_spread")
+        )
+    spread_only = pl.col("wp_source") == "spread"
     return _normalize_market(
-        consensus.filter(pl.col("game_id").is_not_null()).select(
+        consensus.filter(pl.col("game_id").is_not_null() & pl.col("market_home_wp").is_not_null()).select(
             "game_id",
             "market_home_wp",
             pl.col("consensus_home_spread").alias("market_home_spread"),
             pl.lit(source).alias("market_source"),
-            pl.col("n_books_h2h").alias("market_books"),
+            pl.when(spread_only).then(pl.lit("spread_implied")).otherwise(pl.lit("h2h")).alias("market_method"),
+            pl.when(spread_only).then(pl.col("n_books_spread")).otherwise(pl.col("n_books_h2h")).alias("market_books"),
             pl.col("fetched_at").alias("market_as_of"),
         )
     )
+
+
+def _nflverse_current_lines(
+    schedules: pl.DataFrame, week_games: pl.DataFrame, cfg: Settings, now: datetime
+) -> pl.DataFrame:
+    """nflverse moneylines for the week: a game that has kicked off has a closing line; otherwise
+    the line is pre-game, as of the schedules cache fetch time."""
+    entry = ingest.CacheManifest(cfg.manifest_path).get("schedules", None)
+    fetched_at = entry.fetched_at if entry is not None else None
+    kickoffs = week_games.select("game_id", "kickoff_utc")
+    return (
+        _normalize_market(nflverse_market_probs(schedules))
+        .join(kickoffs, on="game_id", how="inner")
+        .with_columns(
+            pl.when(pl.col("market_home_wp").is_null())
+            .then(None)
+            .when(pl.col("kickoff_utc") <= now)
+            .then(pl.lit("nflverse_close"))
+            .otherwise(pl.lit("nflverse_line"))
+            .alias("market_source"),
+            pl.when(pl.col("kickoff_utc") > now)
+            .then(pl.lit(fetched_at, pl.Datetime("us", "UTC")))
+            .alias("market_as_of"),
+        )
+        .drop("kickoff_utc")
+    )
+
+
+def add_kickoff_if_missing(games: pl.DataFrame) -> pl.DataFrame:
+    return games if "kickoff_utc" in games.columns else ingest.add_kickoff_utc(games)
 
 
 def latest_odds_snapshot(cfg: Settings, season: int, week: int) -> pl.DataFrame | None:
@@ -604,9 +669,11 @@ def current_market_probs(
     """Best available de-vigged market probability per current-week game.
 
     Priority: live Odds API consensus, then the latest saved Odds API snapshot for
-    the week, then nflverse moneylines. Games that already kicked off are absent
-    from the Odds API, so they fall back to nflverse closing lines.
+    the week, then nflverse moneylines (``nflverse_line`` before kickoff,
+    ``nflverse_close`` after). Games that already kicked off are absent from the
+    Odds API, so they fall back to nflverse closing lines.
     """
+    now = _as_utc(now or datetime.now(UTC))
     season, week = int(week_games["season"][0]), int(week_games["week"][0])
     ids = week_games["game_id"].implode()
     candidates: list[pl.DataFrame] = []
@@ -620,7 +687,7 @@ def current_market_probs(
     snapshot = latest_odds_snapshot(cfg, season, week)
     if snapshot is not None:
         candidates.append(_odds_consensus_to_market(snapshot, "odds_api_snapshot"))
-    candidates.append(_normalize_market(nflverse_market_probs(schedules)))
+    candidates.append(_nflverse_current_lines(schedules, add_kickoff_if_missing(week_games), cfg, now))
 
     ranked = pl.concat([c.with_columns(pl.lit(rank).alias("_rank")) for rank, c in enumerate(candidates)])
     return (
@@ -635,6 +702,11 @@ def current_market_probs(
 # --------------------------------------------------------------------------- #
 # Contract B payload
 # --------------------------------------------------------------------------- #
+def _as_utc(ts: datetime) -> datetime:
+    """Treat naive datetimes as UTC so comparisons with tz-aware kickoffs never fail."""
+    return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+
+
 def _iso(ts: datetime | None) -> str | None:
     if ts is None:
         return None
@@ -658,17 +730,21 @@ def _algorithm_description() -> str:
     return f'XGBClassifier + CalibratedClassifierCV(method="{CALIBRATION_METHOD}")'
 
 
-def confidence_tier(pick_win_prob: float, model_edge_pct: float | None) -> Tier:
+def confidence_tier(pick_win_prob: float, model_edge_pct: float | None, model_pick_win_prob: float) -> Tier:
     """Map a pick to a tier (first match wins).
 
-    LOCK        the final win probability of the pick is >= 75%
-    VALUE EDGE  the model and the market disagree by >= 5 percentage points
-    LEAN        the final win probability of the pick is >= 55%
+    LOCK        the pick's final win probability is >= 75% and the model also favours the pick
+    VALUE EDGE  the model rates the pick >= 5 percentage points above the market (``model_edge_pct >= +5``)
+    LEAN        the pick's final win probability is >= 55%
     COIN FLIP   everything else
+
+    The edge is directional. When the model rates the *other* side above the
+    market, ``value_team`` names that side, and the disagreement never upgrades
+    the pick's tier.
     """
-    if pick_win_prob >= LOCK_MIN_WIN_PROB:
+    if pick_win_prob >= LOCK_MIN_WIN_PROB and model_pick_win_prob >= 0.5:
         return "LOCK"
-    if model_edge_pct is not None and abs(model_edge_pct) >= VALUE_EDGE_MIN_PCT:
+    if model_edge_pct is not None and model_edge_pct >= VALUE_EDGE_MIN_PCT:
         return "VALUE EDGE"
     if pick_win_prob >= LEAN_MIN_WIN_PROB:
         return "LEAN"
@@ -677,26 +753,33 @@ def confidence_tier(pick_win_prob: float, model_edge_pct: float | None) -> Tier:
 
 def top_drivers(
     contributions: np.ndarray,
-    values: np.ndarray,
+    raw_values: np.ndarray,
     home_team: str,
     away_team: str,
     *,
     feature_columns: Sequence[str] = F.FEATURE_COLUMNS,
     k: int = TOP_DRIVERS,
 ) -> list[dict[str, Any]]:
-    """The ``k`` features with the largest absolute contribution to this game's raw log-odds."""
-    order = np.argsort(-np.abs(contributions), kind="stable")
-    drivers = []
-    for i in order[:k]:
+    """The ``k`` observed features with the largest absolute contribution to this game's raw log-odds.
+
+    Features whose input was not observed (``raw_values`` NaN, e.g. wind before
+    kickoff) are skipped: an imputed or missing input is not a statistical driver.
+    """
+    drivers: list[dict[str, Any]] = []
+    for i in np.argsort(-np.abs(contributions), kind="stable"):
+        if len(drivers) == k:
+            break
         impact = float(contributions[i])
         if impact == 0.0:
             break
+        if not math.isfinite(float(raw_values[i])):
+            continue
         column = feature_columns[i]
         drivers.append(
             {
                 "feature": column,
                 "label": FEATURE_LABELS.get(column, column),
-                "value": _round(float(values[i])),
+                "value": round(float(raw_values[i]), 4),
                 "impact_logit": round(impact, 4),
                 "favors": home_team if impact > 0 else away_team,
             }
@@ -714,6 +797,31 @@ def _flag(value: Any) -> bool | None:
     return None if value is None else bool(value)
 
 
+def _decision_fields(
+    model_pair: dict[str, float], market_pair: dict[str, float] | None, final_pair: dict[str, float]
+) -> dict[str, Any]:
+    """Pick, edge, value side and tier, all derived from the *published* (rounded) probabilities.
+
+    :func:`validate_contract_b` re-derives these from the JSON with this same function.
+    """
+    side = "home" if final_pair["home_wp"] >= 0.5 else "away"
+    pick_wp = final_pair[f"{side}_wp"]
+    if market_pair is None:
+        edge_pick = edge_home = None
+    else:
+        edge_home = round(100.0 * (model_pair["home_wp"] - market_pair["home_wp"]), 2)
+        edge_pick = round(100.0 * (model_pair[f"{side}_wp"] - market_pair[f"{side}_wp"]), 2)
+    value_side = None if not edge_home else ("home" if edge_home > 0 else "away")
+    return {
+        "side": side,
+        "pick_wp": pick_wp,
+        "model_edge_pct": edge_pick,
+        "value_side": value_side,
+        "value_edge_pct": None if value_side is None else abs(edge_home),
+        "tier": confidence_tier(pick_wp, edge_pick, model_pair[f"{side}_wp"]),
+    }
+
+
 def build_payload(
     week_rows: pl.DataFrame,
     fold: FittedFold,
@@ -722,35 +830,39 @@ def build_payload(
     week: int,
     now: datetime,
 ) -> dict[str, Any]:
-    """Assemble the Contract B payload.
+    """Assemble the Contract B payload (``schema_version`` :data:`CONTRACT_VERSION`).
 
     ``week_rows`` is the feature matrix for the week's games, left-joined with the
     current market columns (:data:`_MARKET_COLUMNS`). Per game:
 
-    * ``market`` / ``model`` / ``final``: home and away win probabilities (``market`` is null without a line);
-    * ``pick``: the side ``final`` favours, with its win probability;
-    * ``model_edge_pct``: ``100 * (model - market)`` for the pick side, in percentage points
-      (negative means the market rates the pick higher than the model does); ``value_team`` is the
-      side the model rates above the market;
-    * ``confidence_tier``: :func:`confidence_tier`;
-    * ``top_drivers``: :func:`top_drivers`, explained against the uncalibrated log-odds.
+    * ``market`` / ``model`` / ``final``: home and away win probabilities (``market`` is null without a line;
+      ``market.method`` says how it was priced);
+    * ``pick``: the side ``final`` favours, with its final win probability;
+    * ``model_edge_pct``: ``100 * (model - market)`` on the pick side, in percentage points (negative means
+      the market rates the pick higher than the model does);
+    * ``value_team`` / ``value_edge_pct``: the side the model rates above the market, and by how much;
+    * ``confidence_tier``: :func:`confidence_tier` on the published values;
+    * ``top_drivers``: :func:`top_drivers` (observed inputs only), explained against the uncalibrated log-odds;
+    * ``imputed_inputs``: venue inputs unknown before kickoff that took :data:`MODEL_INPUT_DEFAULTS`.
     """
+    now = _as_utc(now)
     rows = week_rows.sort("kickoff_utc", "game_id")
     model_p = fold.model.predict_proba(rows)
     market_p = _column(rows, "market_home_wp")
     final_p = blend_probabilities(model_p, market_p, fold.blend.weight)
     contributions = fold.model.contributions(rows)
-    values = to_matrix(rows)
+    raw_values = to_matrix(rows, raw=True)
+    column_index = {c: j for j, c in enumerate(F.FEATURE_COLUMNS)}
 
     games = []
     for i, row in enumerate(rows.iter_rows(named=True)):
         home, away = row["home_team"], row["away_team"]
-        pick_home = final_p[i] >= 0.5
-        pick_wp = final_p[i] if pick_home else 1.0 - final_p[i]
         has_market = bool(np.isfinite(market_p[i]))
-        edge_home = 100.0 * (model_p[i] - market_p[i]) if has_market else None
-        edge_pick = None if edge_home is None else (edge_home if pick_home else -edge_home)
-        value_team = None if not edge_home else (home if edge_home > 0 else away)
+        model_pair = _probability_pair(model_p[i])
+        market_pair = _probability_pair(market_p[i]) if has_market else None
+        final_pair = _probability_pair(final_p[i])
+        decision = _decision_fields(model_pair, market_pair, final_pair)
+        side = decision["side"]
         status = _game_status(row, now)
         games.append(
             {
@@ -771,26 +883,27 @@ def build_payload(
                 "net_rest_days": row["net_rest_days"],
                 "market": (
                     {
-                        **_probability_pair(market_p[i]),
+                        **market_pair,
                         "home_spread": _round(row["market_home_spread"], 2),
                         "source": row["market_source"],
+                        "method": row["market_method"],
                         "books": row["market_books"],
                         "as_of": _iso(row["market_as_of"]),
                     }
-                    if has_market
+                    if market_pair is not None
                     else None
                 ),
-                "model": _probability_pair(model_p[i]),
-                "final": _probability_pair(final_p[i]),
-                "pick": {
-                    "team": home if pick_home else away,
-                    "side": "home" if pick_home else "away",
-                    "win_prob": round(float(pick_wp), 4),
-                },
-                "model_edge_pct": _round(edge_pick, 2),
-                "value_team": value_team,
-                "confidence_tier": confidence_tier(float(pick_wp), edge_pick),
-                "top_drivers": top_drivers(contributions[i], values[i], home, away),
+                "model": model_pair,
+                "final": final_pair,
+                "pick": {"team": home if side == "home" else away, "side": side, "win_prob": decision["pick_wp"]},
+                "model_edge_pct": decision["model_edge_pct"],
+                "value_team": None if decision["value_side"] is None else row[f"{decision['value_side']}_team"],
+                "value_edge_pct": decision["value_edge_pct"],
+                "confidence_tier": decision["tier"],
+                "top_drivers": top_drivers(contributions[i], raw_values[i], home, away),
+                "imputed_inputs": [
+                    c for c in MODEL_INPUT_DEFAULTS if not math.isfinite(raw_values[i][column_index[c]])
+                ],
                 "result": (
                     {"home_score": row["home_score"], "away_score": row["away_score"]} if status == "final" else None
                 ),
@@ -811,18 +924,20 @@ def build_payload(
             "calibration_season": split.calibration_season,
             "market_weight": round(blend.weight, 4),
             "market_weight_source": blend.source,
-            "validation": {
+            "weight_fit": {
                 "season": split.calibration_season,
-                "method": "cross-fitted calibration (odd/even weeks)",
+                "in_sample": True,
+                "note": "market weight fit on these games; model probabilities cross-fitted (odd/even weeks)",
                 "brier_model": _round(blend.brier_model),
                 "brier_market": _round(blend.brier_market),
                 "brier_final": _round(blend.brier_final),
                 "n_games": blend.n_games,
             },
+            "input_defaults": dict(MODEL_INPUT_DEFAULTS),
         },
         "tier_rules": {
-            "LOCK": f"pick win probability >= {LOCK_MIN_WIN_PROB:.0%}",
-            "VALUE EDGE": f"|model - market| >= {VALUE_EDGE_MIN_PCT:g} percentage points",
+            "LOCK": f"pick win probability >= {LOCK_MIN_WIN_PROB:.0%} and the model also favours the pick",
+            "VALUE EDGE": f"model rates the pick >= {VALUE_EDGE_MIN_PCT:g} percentage points above the market",
             "LEAN": f"pick win probability >= {LEAN_MIN_WIN_PROB:.0%}",
             "COIN FLIP": "otherwise",
         },
@@ -830,107 +945,247 @@ def build_payload(
     }
 
 
-def validate_contract_b(payload: dict[str, Any]) -> None:
-    """Raise :class:`ContractError` listing every violation of Contract B."""
-    problems: list[str] = []
+_GAME_KEYS: Final[tuple[str, ...]] = (
+    "game_id", "season", "week", "game_type", "kickoff_utc", "status", "home_team", "away_team", "venue",
+    "net_rest_days", "market", "model", "final", "pick", "model_edge_pct", "value_team", "value_edge_pct",
+    "confidence_tier", "top_drivers", "imputed_inputs", "result",
+)  # fmt: skip
+_VENUE_KEYS: Final[tuple[str, ...]] = ("is_neutral_site", "is_outdoor", "is_high_wind", "is_divisional")
 
+
+def _is_int(x: Any) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def _is_num(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _is_prob(x: Any) -> bool:
+    return _is_num(x) and 0.0 <= x <= 1.0
+
+
+def _parse_iso(x: Any) -> datetime | None:
+    if not isinstance(x, str):
+        return None
+    try:
+        ts = datetime.fromisoformat(x.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+
+
+def _close(a: Any, b: Any, tol: float) -> bool:
+    return _is_num(a) and _is_num(b) and abs(a - b) <= tol
+
+
+def validate_contract_b(payload: Any) -> None:
+    """Raise :class:`ContractError` listing every violation of Contract B.
+
+    Checks types (booleans are not numbers), ranges, and cross-field consistency:
+    final = blend(model, market) at ``model.market_weight``; pick, edge,
+    value_team and tier re-derived from the published probabilities; driver signs.
+    It also checks temporal consistency: walk-forward metadata, game season/week,
+    status vs kickoff, and market timestamps vs ``generated_at``. Malformed
+    structures are reported, never raised as other exception types.
+    """
+    if not isinstance(payload, dict):
+        raise ContractError("Contract B violations:\n  - payload must be a JSON object")
+    problems: list[str] = []
+    try:
+        _check_contract_b(payload, problems)
+    except Exception as exc:  # noqa: BLE001 - a malformed payload must surface as a ContractError
+        problems.append(f"malformed payload ({type(exc).__name__}: {exc})")
+    if problems:
+        raise ContractError("Contract B violations:\n  - " + "\n  - ".join(problems))
+
+
+def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
     def check(condition: bool, message: str) -> None:
         if not condition:
             problems.append(message)
 
-    def is_prob(x: Any) -> bool:
-        return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and 0.0 <= x <= 1.0
-
-    def check_pair(pair: Any, where: str) -> None:
-        if not isinstance(pair, dict) or not is_prob(pair.get("home_wp")) or not is_prob(pair.get("away_wp")):
+    def check_pair(pair: Any, where: str) -> bool:
+        if not isinstance(pair, dict) or not _is_prob(pair.get("home_wp")) or not _is_prob(pair.get("away_wp")):
             problems.append(f"{where}: home_wp/away_wp must be probabilities")
-        elif abs(pair["home_wp"] + pair["away_wp"] - 1.0) > 1e-3:
-            problems.append(f"{where}: home_wp + away_wp must equal 1")
-
-    def is_iso(x: Any) -> bool:
-        try:
-            return isinstance(x, str) and datetime.fromisoformat(x.replace("Z", "+00:00")) is not None
-        except ValueError:
             return False
+        if abs(pair["home_wp"] + pair["away_wp"] - 1.0) > 1e-3:
+            problems.append(f"{where}: home_wp + away_wp must equal 1")
+            return False
+        return True
 
     check(payload.get("contract") == CONTRACT_NAME, f"contract must be {CONTRACT_NAME!r}")
     check(isinstance(payload.get("schema_version"), str), "schema_version must be a string")
-    check(is_iso(payload.get("generated_at")), "generated_at must be ISO-8601")
-    check(isinstance(payload.get("season"), int), "season must be an int")
-    check(isinstance(payload.get("week"), int), "week must be an int")
+    generated_at = _parse_iso(payload.get("generated_at"))
+    check(generated_at is not None, "generated_at must be ISO-8601")
+    season, week = payload.get("season"), payload.get("week")
+    check(_is_int(season), "season must be an int")
+    check(_is_int(week), "week must be an int")
+
+    weight = None
     model = payload.get("model")
     if isinstance(model, dict):
-        check(is_prob(model.get("market_weight")), "model.market_weight must be in [0, 1]")
+        weight = model.get("market_weight")
+        check(_is_prob(weight), "model.market_weight must be in [0, 1]")
         check(model.get("market_weight_source") in ("optimized", "default"), "model.market_weight_source invalid")
+        train = model.get("train_seasons")
+        calibration = model.get("calibration_season")
+        if isinstance(train, list) and train and all(_is_int(t) for t in train) and _is_int(season):
+            check(max(train) <= season - 2, "model.train_seasons must end by season - 2 (walk-forward)")
+        else:
+            problems.append("model.train_seasons must be a non-empty list of ints")
         check(
-            isinstance(model.get("train_seasons"), list) and bool(model.get("train_seasons")),
-            "model.train_seasons empty",
+            _is_int(calibration) and _is_int(season) and calibration == season - 1,
+            "model.calibration_season must be season - 1",
         )
     else:
         problems.append("model must be an object")
+
     games = payload.get("games")
     if not isinstance(games, list):
         problems.append("games must be a list")
-        games = []
+        return
     ids = [g.get("game_id") for g in games if isinstance(g, dict)]
     check(len(ids) == len(set(ids)), "game_id values must be unique")
 
-    required = (
-        "game_id", "season", "week", "game_type", "kickoff_utc", "status", "home_team", "away_team", "venue",
-        "net_rest_days", "market", "model", "final", "pick", "model_edge_pct", "value_team", "confidence_tier",
-        "top_drivers", "result",
-    )  # fmt: skip
     for n, game in enumerate(games):
         where = f"games[{n}]"
         if not isinstance(game, dict):
             problems.append(f"{where} must be an object")
             continue
-        missing = [key for key in required if key not in game]
+        missing = [key for key in _GAME_KEYS if key not in game]
         if missing:
             problems.append(f"{where} missing {missing}")
             continue
         where = f"games[{n}] ({game['game_id']})"
-        check(is_iso(game["kickoff_utc"]), f"{where}: kickoff_utc must be ISO-8601")
-        check(game["status"] in GAME_STATUSES, f"{where}: status must be one of {GAME_STATUSES}")
-        check_pair(game["model"], f"{where}.model")
-        check_pair(game["final"], f"{where}.final")
-        if game["market"] is not None:
-            check_pair(game["market"], f"{where}.market")
-            check(
-                game["market"].get("source") in MARKET_SOURCES,
-                f"{where}: market.source must be one of {MARKET_SOURCES}",
-            )
-        else:
-            check(game["model_edge_pct"] is None, f"{where}: model_edge_pct must be null without a market line")
-        pick = game["pick"]
-        if isinstance(pick, dict) and pick.get("side") in ("home", "away") and isinstance(game["final"], dict):
-            check(pick.get("team") == game[f"{pick['side']}_team"], f"{where}: pick.team does not match pick.side")
-            check(
-                abs(pick.get("win_prob", -1) - game["final"].get(f"{pick['side']}_wp", -2)) < 1e-3,
-                f"{where}: pick.win_prob must equal the final probability of the pick side",
-            )
-            check(pick.get("win_prob", 0) >= 0.5 - 1e-9, f"{where}: pick must be the side final favours")
-        else:
-            problems.append(f"{where}: pick must have side 'home' or 'away'")
-        check(game["confidence_tier"] in TIERS, f"{where}: confidence_tier must be one of {TIERS}")
-        edge = game["model_edge_pct"]
+        home, away = game["home_team"], game["away_team"]
         check(
-            edge is None or (isinstance(edge, (int, float)) and math.isfinite(edge)), f"{where}: model_edge_pct invalid"
+            isinstance(home, str) and isinstance(away, str) and home and away and home != away,
+            f"{where}: teams invalid",
         )
-        check(game["value_team"] in (None, game["home_team"], game["away_team"]), f"{where}: value_team invalid")
+        check(game["season"] == season and _is_int(game["season"]), f"{where}: season must equal the payload season")
+        check(game["week"] == week and _is_int(game["week"]), f"{where}: week must equal the payload week")
+        kickoff = _parse_iso(game["kickoff_utc"])
+        check(kickoff is not None, f"{where}: kickoff_utc must be ISO-8601")
+        status = game["status"]
+        check(status in GAME_STATUSES, f"{where}: status must be one of {GAME_STATUSES}")
+        if kickoff is not None and generated_at is not None and status in GAME_STATUSES:
+            check((status == "scheduled") == (kickoff > generated_at), f"{where}: status inconsistent with kickoff_utc")
+        venue = game["venue"]
+        venue_ok = isinstance(venue, dict) and all(
+            k in venue and (venue[k] is None or isinstance(venue[k], bool)) for k in _VENUE_KEYS
+        )
+        check(venue_ok, f"{where}: venue must hold bool-or-null {_VENUE_KEYS}")
+        check(game["net_rest_days"] is None or _is_int(game["net_rest_days"]), f"{where}: net_rest_days must be an int")
+
+        pairs_ok = check_pair(game["model"], f"{where}.model") & check_pair(game["final"], f"{where}.final")
+        market = game["market"]
+        if market is not None:
+            if not isinstance(market, dict):
+                problems.append(f"{where}: market must be an object or null")
+                continue
+            pairs_ok &= check_pair(market, f"{where}.market")
+            check(market.get("source") in MARKET_SOURCES, f"{where}: market.source must be one of {MARKET_SOURCES}")
+            check(
+                market.get("method") in (*MARKET_METHODS, None),
+                f"{where}: market.method must be one of {MARKET_METHODS}",
+            )
+            check(
+                market.get("books") is None or (_is_int(market["books"]) and market["books"] >= 0),
+                f"{where}: market.books invalid",
+            )
+            check(
+                market.get("home_spread") is None or _is_num(market["home_spread"]),
+                f"{where}: market.home_spread invalid",
+            )
+            as_of = market.get("as_of")
+            if as_of is not None:
+                as_of_dt = _parse_iso(as_of)
+                check(
+                    as_of_dt is not None and (generated_at is None or as_of_dt <= generated_at),
+                    f"{where}: market.as_of invalid or after generated_at",
+                )
+        if not pairs_ok:
+            continue
+
+        # Cross-field: blend, then every decision field re-derived from the published probabilities.
+        if market is not None and _is_prob(weight):
+            blended = weight * market["home_wp"] + (1 - weight) * game["model"]["home_wp"]
+            check(
+                abs(game["final"]["home_wp"] - blended) <= 2e-4,
+                f"{where}: final != market_weight blend of market and model",
+            )
+        elif market is None:
+            check(game["final"] == game["model"], f"{where}: final must equal model when there is no market line")
+        expected = _decision_fields(game["model"], market, game["final"])
+        pick = game["pick"]
+        if not isinstance(pick, dict):
+            problems.append(f"{where}: pick must be an object")
+            continue
+        check(pick.get("side") == expected["side"], f"{where}: pick.side must be the side final favours")
+        check(pick.get("team") == game.get(f"{expected['side']}_team"), f"{where}: pick.team does not match pick.side")
+        check(
+            _close(pick.get("win_prob"), expected["pick_wp"], 1e-9),
+            f"{where}: pick.win_prob must equal the final probability of the pick",
+        )
+        edge = game["model_edge_pct"]
+        if expected["model_edge_pct"] is None:
+            check(edge is None, f"{where}: model_edge_pct must be null without a market line")
+        else:
+            check(
+                _close(edge, expected["model_edge_pct"], 0.011),
+                f"{where}: model_edge_pct must equal 100*(model - market) on the pick side",
+            )
+        value_team = None if expected["value_side"] is None else game[f"{expected['value_side']}_team"]
+        check(
+            game["value_team"] == value_team, f"{where}: value_team must be the side the model rates above the market"
+        )
+        if expected["value_edge_pct"] is None:
+            check(game["value_edge_pct"] is None, f"{where}: value_edge_pct must be null without a value side")
+        else:
+            check(
+                _close(game["value_edge_pct"], expected["value_edge_pct"], 0.011),
+                f"{where}: value_edge_pct inconsistent",
+            )
+        check(game["confidence_tier"] in TIERS, f"{where}: confidence_tier must be one of {TIERS}")
+        if _is_prob(pick.get("win_prob")) and (edge is None or _is_num(edge)):
+            tier = confidence_tier(pick["win_prob"], edge, game["model"][f"{expected['side']}_wp"])
+            check(
+                game["confidence_tier"] == tier,
+                f"{where}: confidence_tier {game['confidence_tier']!r} contradicts tier_rules (expected {tier!r})",
+            )
+
         drivers = game["top_drivers"]
         if isinstance(drivers, list) and len(drivers) <= TOP_DRIVERS:
+            impacts = []
             for d in drivers:
-                ok = isinstance(d, dict) and {"feature", "label", "value", "impact_logit", "favors"} <= d.keys()
-                check(ok and d["favors"] in (game["home_team"], game["away_team"]), f"{where}: malformed driver {d}")
+                ok = (
+                    isinstance(d, dict)
+                    and d.get("feature") in F.FEATURE_COLUMNS
+                    and isinstance(d.get("label"), str)
+                    and _is_num(d.get("value"))
+                    and _is_num(d.get("impact_logit"))
+                    and d["impact_logit"] != 0
+                    and d.get("favors") == (home if d["impact_logit"] > 0 else away)
+                )
+                check(ok, f"{where}: malformed driver {d}")
+                if ok:
+                    impacts.append(abs(d["impact_logit"]))
+            check(impacts == sorted(impacts, reverse=True), f"{where}: top_drivers must be ordered by |impact_logit|")
         else:
             problems.append(f"{where}: top_drivers must be a list of at most {TOP_DRIVERS}")
+        imputed = game["imputed_inputs"]
         check(
-            (game["result"] is not None) == (game["status"] == "final"), f"{where}: result must be set only when final"
+            isinstance(imputed, list) and set(imputed) <= set(MODEL_INPUT_DEFAULTS), f"{where}: imputed_inputs invalid"
         )
-
-    if problems:
-        raise ContractError("Contract B violations:\n  - " + "\n  - ".join(problems))
+        result = game["result"]
+        if status == "final":
+            check(
+                isinstance(result, dict) and _is_int(result.get("home_score")) and _is_int(result.get("away_score")),
+                f"{where}: final games need integer home_score/away_score",
+            )
+        else:
+            check(result is None, f"{where}: result must be null unless status is final")
 
 
 # --------------------------------------------------------------------------- #
@@ -947,6 +1202,7 @@ def predict_week(
     random_state: int = RANDOM_STATE,
 ) -> dict[str, Any]:
     """Train the production fold for ``season`` and return the validated Contract B payload for ``week``."""
+    now = _as_utc(now)
     history = features.join(
         nflverse_market_probs(schedules).select("game_id", "market_home_wp"), on="game_id", how="left"
     )
@@ -959,9 +1215,40 @@ def predict_week(
     )
     if week_rows.is_empty():
         raise ModelError(f"no feature rows for {season} week {week}; rebuild features")
+    _warn_on_serving_missingness(_season_rows(data, split.train_seasons), week_rows)
     payload = build_payload(week_rows, fold, season=season, week=week, now=now)
     validate_contract_b(payload)
     return payload
+
+
+def _warn_on_serving_missingness(train: pl.DataFrame, serving: pl.DataFrame, *, rare: float = 0.01) -> None:
+    """Flag serving rows with a feature missing that training almost never saw missing.
+
+    XGBoost would route such rows down a missing-value branch fitted on a handful of
+    unrepresentative games. Venue flags in :data:`MODEL_INPUT_DEFAULTS` are reported
+    at INFO level, since they are defaulted on purpose.
+    """
+    for column in F.FEATURE_COLUMNS:
+        serving_nulls = serving[column].null_count()
+        if not serving_nulls:
+            continue
+        if column in MODEL_INPUT_DEFAULTS:
+            logger.info(
+                "%d game(s) have unknown %s before kickoff; using %g",
+                serving_nulls,
+                column,
+                MODEL_INPUT_DEFAULTS[column],
+            )
+            continue
+        train_rate = train[column].null_count() / max(train.height, 1)
+        if train_rate < rare:
+            logger.warning(
+                "%d game(s) are missing %s, which was missing in only %.2f%% of training rows; their probabilities "
+                "rely on a sparsely trained branch",
+                serving_nulls,
+                column,
+                100 * train_rate,
+            )
 
 
 def write_payload(payload: dict[str, Any], path: Path) -> Path:

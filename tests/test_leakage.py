@@ -411,15 +411,83 @@ def test_wind_forecast_override_fills_upcoming_games(league):
 # --------------------------------------------------------------------------- #
 # Project-wide guard: chronological splits only
 # --------------------------------------------------------------------------- #
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _project_sources() -> list[Path]:
+    """Every first-party .py file: root-level scripts (app.py, run_weekly.py, config.py), src/ and app/."""
+    files = sorted(ROOT.glob("*.py"))
+    for folder in ("src", "app"):
+        files += sorted((ROOT / folder).rglob("*.py"))
+    return files
+
+
 def test_no_random_train_test_split_anywhere():
-    root = Path(__file__).resolve().parents[1]
     offenders = [
-        str(path.relative_to(root))
-        for folder in ("src", "app")
-        for path in (root / folder).rglob("*.py")
+        str(path.relative_to(ROOT))
+        for path in _project_sources()
         if re.search(r"\btrain_test_split\b", path.read_text(encoding="utf-8"))
     ]
     assert not offenders, f"random train_test_split is banned (use walk-forward splits): {offenders}"
+
+
+def test_nfl_data_py_is_never_used():
+    """CLAUDE.md: nflreadpy only; nfl_data_py is deprecated."""
+    pattern = re.compile(r"^\s*(import|from)\s+nfl_data_py\b", re.MULTILINE)
+    offenders = [str(p.relative_to(ROOT)) for p in _project_sources() if pattern.search(p.read_text(encoding="utf-8"))]
+    assert not offenders, f"nfl_data_py imported in {offenders}"
+    assert "nfl_data_py" not in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Probability bounds
+# --------------------------------------------------------------------------- #
+def _assert_probabilities(values: Any, name: str) -> None:
+    import numpy as np
+
+    arr = np.asarray(values, dtype=float)
+    assert np.isfinite(arr).all(), f"{name}: non-finite probabilities"
+    assert ((arr > 0.0) & (arr < 1.0)).all(), f"{name}: probabilities must lie strictly inside (0, 1)"
+
+
+def test_walk_forward_probabilities_are_bounded(synthetic_league):
+    from src import model as M
+
+    features, schedules = synthetic_league
+    frame = features.join(M.nflverse_market_probs(schedules).select("game_id", "market_home_wp"), on="game_id")
+    result = M.walk_forward_backtest(frame.filter(pl.col("season") <= 2020))
+    for column in ("model_home_wp", "final_home_wp"):
+        _assert_probabilities(result.predictions[column], column)
+    _assert_probabilities(result.predictions["market_home_wp"].drop_nulls(), "market_home_wp")
+
+
+def test_calibrated_probabilities_stay_bounded_on_extreme_inputs(synthetic_league):
+    from src import model as M
+
+    features, schedules = synthetic_league
+    data = M.labeled_rows(features)
+    fitted = M.WinProbabilityModel().fit(data.filter(pl.col("season") <= 2018), data.filter(pl.col("season") == 2019))
+    extreme = data.filter(pl.col("season") == 2020).with_columns(pl.col(F.TEAM_FEATURE_COLUMNS) * 100)
+    extreme = extreme.with_columns((pl.col("net_pass_epa_mismatch") * 100).alias("net_pass_epa_mismatch"))
+    _assert_probabilities(fitted.predict_proba(extreme), "calibrated P(home win) on extreme inputs")
+
+
+def test_payload_probabilities_are_bounded_and_coherent(synthetic_league):
+    from src import model as M
+
+    features, schedules = synthetic_league
+    payload = M.predict_week(
+        features, schedules, M.nflverse_market_probs(schedules), season=2026, week=6, now=datetime(2026, 10, 16)
+    )
+    for game in payload["games"]:
+        for block in ("model", "final", "market"):
+            pair = game[block]
+            if pair is None:
+                continue
+            _assert_probabilities([pair["home_wp"], pair["away_wp"]], f"{game['game_id']}.{block}")
+            assert math.isclose(pair["home_wp"] + pair["away_wp"], 1.0, abs_tol=1e-4)
+        assert 0.5 <= game["pick"]["win_prob"] < 1.0
+    assert 0.0 <= payload["model"]["market_weight"] <= 1.0
 
 
 # --------------------------------------------------------------------------- #

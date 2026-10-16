@@ -20,97 +20,11 @@ from src import ingest
 from src import model as M
 
 NOW = datetime(2026, 10, 16, 18, 0, tzinfo=UTC)
-TEAMS = ["KC", "BUF", "PHI", "DAL", "SF", "DET", "BAL", "CIN", "GB", "LA", "MIA", "HOU", "PIT", "SEA", "MIN", "TB"]
-
-
-# --------------------------------------------------------------------------- #
-# Synthetic league with a known data-generating process
-# --------------------------------------------------------------------------- #
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-x))
-
-
-def _american(q: float) -> int:
-    """American price for a vig-inclusive implied probability ``q``."""
-    return round(-100 * q / (1 - q)) if q >= 0.5 else round(100 * (1 - q) / q)
-
-
-def make_frame(
-    seasons: range = range(2016, 2027),
-    weeks: int = 18,
-    upcoming: tuple[int, int] | None = (2026, 6),
-    seed: int = 3,
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Feature matrix (``F.OUTPUT_COLUMNS``) and matching schedules with moneylines."""
-    rng = np.random.default_rng(seed)
-    rows, sched = [], []
-    for season in seasons:
-        last_week = upcoming[1] if upcoming and season == upcoming[0] else weeks
-        for week in range(1, last_week + 1):
-            kickoff = datetime(season, 9, 13, 17, tzinfo=UTC) + timedelta(days=7 * (week - 1))
-            for g in range(8):
-                home, away = TEAMS[(2 * g + week) % 16], TEAMS[(2 * g + 1 + 3 * week) % 16]
-                if home == away:
-                    away = TEAMS[(TEAMS.index(home) + 1) % 16]
-                values = {c: float(rng.normal(0, 0.1)) for c in F.TEAM_FEATURE_COLUMNS}
-                values |= {
-                    "net_pass_epa_mismatch": float(rng.normal(0, 0.15)),
-                    "net_rush_epa_mismatch": float(rng.normal(0, 0.1)),
-                    "diff_early_down_sr": float(rng.normal(0, 0.05)),
-                    "diff_qb_cpoe": float(rng.normal(0, 3)),
-                    "net_rest_days": int(rng.choice([-3, 0, 0, 0, 3])),
-                    "is_divisional": int(rng.random() < 0.35),
-                    "is_neutral_site": int(rng.random() < 0.03),
-                    "is_outdoor": int(rng.random() < 0.7),
-                    "is_high_wind_outdoor": None if rng.random() < 0.1 else int(rng.random() < 0.1),
-                    "prior_weight": max(0.0, 1 - 0.25 * (week - 1)),
-                }
-                logit = 4.0 * values["net_pass_epa_mismatch"] + 3.0 * values["net_rush_epa_mismatch"] + 0.15
-                p_true = float(_sigmoid(np.array(logit)))
-                p_market = float(_sigmoid(np.array(logit + rng.normal(0, 0.15))))
-                played = not (upcoming and season == upcoming[0] and week == upcoming[1])
-                home_win = int(rng.random() < p_true) if played else None
-                gid = f"{season}_{week:02d}_{away}_{home}_{g}"
-                rows.append(
-                    {
-                        "game_id": gid,
-                        "season": season,
-                        "week": week,
-                        "game_type": "REG",
-                        "kickoff_utc": kickoff + timedelta(hours=3 * g),
-                        "home_team": home,
-                        "away_team": away,
-                        **values,
-                        "spread_line": round(10 * (p_market - 0.5), 1),
-                        "home_score": (24 if home_win else 17) if played else None,
-                        "away_score": (17 if home_win else 24) if played else None,
-                        "result": (7 if home_win else -7) if played else None,
-                        "total": 41 if played else None,
-                        "home_win": home_win,
-                    }
-                )
-                vig = 1.045
-                sched.append(
-                    {
-                        "game_id": gid,
-                        "season": season,
-                        "home_moneyline": _american(min(p_market * vig, 0.97)),
-                        "away_moneyline": _american(min((1 - p_market) * vig, 0.97)),
-                        "spread_line": round(10 * (p_market - 0.5), 1),
-                    }
-                )
-    frame = pl.DataFrame(rows, infer_schema_length=None).with_columns(
-        pl.col("kickoff_utc").dt.cast_time_unit("us"),
-        pl.col(["season", "week"]).cast(pl.Int32),
-        pl.col("home_win").cast(pl.Int8),
-        *(pl.col(c).cast(pl.Int8) for c in ("is_divisional", "is_neutral_site", "is_outdoor", "is_high_wind_outdoor")),
-    )
-    return frame.select(F.OUTPUT_COLUMNS), pl.DataFrame(sched)
 
 
 @pytest.fixture(scope="module")
-def league() -> tuple[pl.DataFrame, pl.DataFrame]:
-    return make_frame()
+def league(synthetic_league) -> tuple[pl.DataFrame, pl.DataFrame]:
+    return synthetic_league
 
 
 @pytest.fixture(scope="module")
@@ -305,20 +219,34 @@ def test_metrics():
 # Tiers
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
-    ("win_prob", "edge", "tier"),
+    ("win_prob", "edge", "model_pick", "tier"),
     [
-        (0.80, None, "LOCK"),
-        (0.75, -9.0, "LOCK"),
-        (0.62, 6.0, "VALUE EDGE"),
-        (0.52, -5.0, "VALUE EDGE"),
-        (0.62, 4.9, "LEAN"),
-        (0.55, None, "LEAN"),
-        (0.54, 1.0, "COIN FLIP"),
-        (0.50, None, "COIN FLIP"),
+        (0.80, None, 0.78, "LOCK"),
+        (0.75, -9.0, 0.66, "LOCK"),  # the model still favours the pick
+        (0.78, -30.0, 0.45, "LEAN"),  # strong final, but the model picks the other side: not a LOCK
+        (0.62, 6.0, 0.68, "VALUE EDGE"),
+        (0.52, 5.0, 0.57, "VALUE EDGE"),  # value on the pick, even near a coin flip
+        (0.52, -5.0, 0.47, "COIN FLIP"),  # value is on the OTHER side: never upgrades the pick
+        (0.62, -12.0, 0.50, "LEAN"),
+        (0.62, 4.99, 0.67, "LEAN"),
+        (0.55, None, 0.55, "LEAN"),
+        (0.54, 1.0, 0.55, "COIN FLIP"),
+        (0.50, None, 0.50, "COIN FLIP"),
     ],
 )
-def test_confidence_tier(win_prob, edge, tier):
-    assert M.confidence_tier(win_prob, edge) == tier
+def test_confidence_tier(win_prob, edge, model_pick, tier):
+    assert M.confidence_tier(win_prob, edge, model_pick) == tier
+
+
+def test_tiers_in_payload_are_directional(payload):
+    for game in payload["games"]:
+        side = game["pick"]["side"]
+        if game["confidence_tier"] == "VALUE EDGE":
+            assert game["value_team"] == game["pick"]["team"] and game["model_edge_pct"] >= 5.0
+        if game["confidence_tier"] == "LOCK":
+            assert game["model"][f"{side}_wp"] >= 0.5
+        if game["value_team"] is not None and game["value_team"] != game["pick"]["team"]:
+            assert game["model_edge_pct"] < 0 and game["confidence_tier"] != "VALUE EDGE"
 
 
 # --------------------------------------------------------------------------- #
@@ -391,6 +319,35 @@ def test_drivers_are_aligned_with_the_true_signal(frame):
         (lambda p: p["games"][0].pop("top_drivers"), "missing"),
         (lambda p: p.update(contract="A"), "contract"),
         (lambda p: p["model"].update(market_weight=1.5), "market_weight"),
+        (
+            lambda p: p["games"][0].update(
+                confidence_tier="LOCK" if p["games"][0]["confidence_tier"] != "LOCK" else "COIN FLIP"
+            ),
+            "contradicts",
+        ),
+        (lambda p: p["games"][0]["final"].update(home_wp=0.99, away_wp=0.01), "blend|pick"),
+        (lambda p: p["games"][0].update(model_edge_pct=55.0), "model_edge_pct"),
+        (
+            lambda p: p["games"][0].update(
+                value_team=p["games"][0]["home_team"]
+                if p["games"][0]["value_team"] != p["games"][0]["home_team"]
+                else p["games"][0]["away_team"]
+            ),
+            "value_team",
+        ),
+        (lambda p: p.update(season=True), "season"),
+        (lambda p: p["games"][0].update(market="odds_api"), "market must be an object"),
+        (lambda p: p["games"][0]["pick"].update(win_prob=None), "pick.win_prob"),
+        (lambda p: p["model"].update(train_seasons=[*p["model"]["train_seasons"], p["season"]]), "walk-forward"),
+        (lambda p: p["model"].update(calibration_season=p["season"]), "calibration_season"),
+        (lambda p: p["games"][0].update(week=p["week"] + 1), "week must equal"),
+        (lambda p: p["games"][0].update(kickoff_utc="2026-10-01T17:00:00Z"), "status inconsistent"),
+        (lambda p: p["games"][0]["market"].update(as_of="2027-01-01T00:00:00Z"), "as_of"),
+        (
+            lambda p: p["games"][0]["top_drivers"][0].update(favors=p["games"][0]["top_drivers"][0]["favors"] + "X"),
+            "driver",
+        ),
+        (lambda p: p["games"][0].update(imputed_inputs=["home_qb_cpoe_pre"]), "imputed_inputs"),
     ],
 )
 def test_validator_rejects_broken_payloads(payload, mutate, message):
@@ -403,14 +360,17 @@ def test_validator_rejects_broken_payloads(payload, mutate, message):
 # --------------------------------------------------------------------------- #
 # Current-week market source priority
 # --------------------------------------------------------------------------- #
-def _consensus(game_ids: list[str], home_wp: float) -> pl.DataFrame:
+def _consensus(game_ids: list[str], home_wp: float, *, spread_only: tuple[str, ...] = ()) -> pl.DataFrame:
+    n = len(game_ids)
     return pl.DataFrame(
         {
             "game_id": game_ids,
-            "market_home_wp": [home_wp] * len(game_ids),
-            "consensus_home_spread": [-3.0] * len(game_ids),
-            "n_books_h2h": pl.Series([7] * len(game_ids), dtype=pl.UInt32),
-            "fetched_at": pl.Series([NOW] * len(game_ids), dtype=pl.Datetime("us", "UTC")),
+            "market_home_wp": [home_wp] * n,
+            "wp_source": ["spread" if g in spread_only else "h2h" for g in game_ids],
+            "consensus_home_spread": [-3.0] * n,
+            "n_books_h2h": pl.Series([0 if g in spread_only else 7 for g in game_ids], dtype=pl.UInt32),
+            "n_books_spread": pl.Series([3] * n, dtype=pl.UInt32),
+            "fetched_at": pl.Series([NOW] * n, dtype=pl.Datetime("us", "UTC")),
         }
     )
 
@@ -430,13 +390,26 @@ def test_current_market_priority(tmp_path, monkeypatch, league):
     by_id = {r["game_id"]: r for r in offline.iter_rows(named=True)}
     assert by_id[ids[0]]["market_source"] == "odds_api_snapshot"
     assert by_id[ids[0]]["market_home_wp"] == pytest.approx(0.66)  # newest snapshot wins
-    assert by_id[ids[1]]["market_source"] == "nflverse_close"  # not in the newest snapshot
-    assert {by_id[i]["market_source"] for i in ids[2:]} == {"nflverse_close"}
+    # Not in the newest snapshot -> nflverse. These games have not kicked off, so it is a pre-game line, not a close.
+    assert by_id[ids[1]]["market_source"] == "nflverse_line"
+    assert {by_id[i]["market_source"] for i in ids[2:]} == {"nflverse_line"}
+    assert {by_id[i]["market_method"] for i in ids[1:]} == {"nflverse_moneyline"}
+    after_kickoff = M.current_market_probs(week_games, schedules, cfg, use_odds_api=False, now=NOW + timedelta(days=5))
+    assert set(after_kickoff.filter(pl.col("market_source").str.starts_with("nflverse"))["market_source"]) == {
+        "nflverse_close"
+    }
+    assert (
+        after_kickoff.filter(pl.col("market_source") == "nflverse_close")["market_as_of"].null_count()
+        == after_kickoff.filter(pl.col("market_source") == "nflverse_close").height
+    )
 
-    monkeypatch.setattr(ingest, "fetch_market_win_probs", lambda **_: _consensus(ids, 0.55))
+    monkeypatch.setattr(ingest, "fetch_market_win_probs", lambda **_: _consensus(ids, 0.55, spread_only=(ids[0],)))
     live = M.current_market_probs(week_games, schedules, cfg, use_odds_api=True, now=NOW)
     assert set(live["market_source"]) == {"odds_api"}
     assert live["market_home_wp"].to_list() == pytest.approx([0.55] * len(ids))
+    spread_row = live.filter(pl.col("game_id") == ids[0]).row(0, named=True)
+    assert (spread_row["market_method"], spread_row["market_books"]) == ("spread_implied", 3)  # not 0 h2h books
+    assert set(live.filter(pl.col("game_id") != ids[0])["market_method"]) == {"h2h"}
 
     def broken(**_):
         raise ingest.OddsAPIQuotaError("out of credits")
@@ -445,3 +418,49 @@ def test_current_market_priority(tmp_path, monkeypatch, league):
     degraded = M.current_market_probs(week_games, schedules, cfg, use_odds_api=True, now=NOW)
     assert "odds_api" not in set(degraded["market_source"])
     assert degraded.height == len(ids)
+
+
+def test_validator_reports_non_object_payload_as_contract_error():
+    with pytest.raises(M.ContractError, match="JSON object"):
+        M.validate_contract_b([1, 2, 3])
+
+
+# --------------------------------------------------------------------------- #
+# Pre-game-unknown venue inputs (train/serve consistency)
+# --------------------------------------------------------------------------- #
+def test_unknown_venue_inputs_predict_like_their_default(frame):
+    data = M.labeled_rows(frame)
+    fitted = M.WinProbabilityModel().fit(data.filter(pl.col("season") <= 2018), data.filter(pl.col("season") == 2019))
+    rows = data.filter(pl.col("season") == 2020).head(40)
+    unknown = rows.with_columns(
+        pl.lit(None, pl.Int8).alias("is_high_wind_outdoor"), pl.lit(None, pl.Int8).alias("is_outdoor")
+    )
+    defaulted = rows.with_columns(
+        pl.lit(0, pl.Int8).alias("is_high_wind_outdoor"), pl.lit(0, pl.Int8).alias("is_outdoor")
+    )
+    np.testing.assert_array_equal(fitted.predict_proba(unknown), fitted.predict_proba(defaulted))
+    assert np.isnan(M.to_matrix(unknown, raw=True)[:, F.FEATURE_COLUMNS.index("is_outdoor")]).all()
+
+
+def test_drivers_skip_unobserved_inputs():
+    columns = ["is_high_wind_outdoor", "net_pass_epa_mismatch", "net_rush_epa_mismatch"]
+    drivers = M.top_drivers(
+        np.array([-0.9, 0.4, -0.2]), np.array([np.nan, 0.12, -0.05]), "KC", "BUF", feature_columns=columns, k=3
+    )
+    assert [d["feature"] for d in drivers] == ["net_pass_epa_mismatch", "net_rush_epa_mismatch"]
+    assert [d["favors"] for d in drivers] == ["KC", "BUF"]
+
+
+def test_payload_reports_imputed_inputs(league):
+    features, schedules = league
+    week_ids = features.filter((pl.col("season") == 2026) & (pl.col("week") == 6))["game_id"].to_list()
+    windless = features.with_columns(
+        pl.when(pl.col("game_id") == week_ids[0])
+        .then(None)
+        .otherwise(pl.col("is_high_wind_outdoor"))
+        .alias("is_high_wind_outdoor")
+    )
+    payload = M.predict_week(windless, schedules, M.nflverse_market_probs(schedules), season=2026, week=6, now=NOW)
+    game = next(g for g in payload["games"] if g["game_id"] == week_ids[0])
+    assert "is_high_wind_outdoor" in game["imputed_inputs"]
+    assert all(d["feature"] != "is_high_wind_outdoor" for d in game["top_drivers"])
