@@ -235,14 +235,63 @@ def test_metrics():
     ],
 )
 def test_confidence_tier(win_prob, edge, model_pick, tier):
+    five_points = M.TierThresholds(lock_min_win_prob=0.75, value_edge_min_pct=5.0, lean_min_win_prob=0.55)
+    assert M.confidence_tier(win_prob, edge, model_pick, five_points) == tier
+
+
+@pytest.mark.parametrize(
+    ("win_prob", "edge", "model_pick", "tier"),
+    [
+        (0.62, 6.0, 0.68, "LEAN"),  # a VALUE EDGE at 5 points is calibration noise at the 8-point default
+        (0.52, 7.99, 0.60, "COIN FLIP"),
+        (0.52, 8.0, 0.60, "VALUE EDGE"),
+        (0.66, 12.5, 0.785, "VALUE EDGE"),
+    ],
+)
+def test_default_value_edge_threshold_is_eight_points(win_prob, edge, model_pick, tier):
+    assert settings.tier_value_edge_min_pct == 8.0
+    assert M.TierThresholds.from_settings().value_edge_min_pct == 8.0
     assert M.confidence_tier(win_prob, edge, model_pick) == tier
+
+
+def test_tier_thresholds_come_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("NFL_VALUE_EDGE_MIN_PCT", "6.5")
+    monkeypatch.setenv("NFL_TIER_LOCK_MIN_WIN_PROB", "0.8")
+    cfg = Settings.from_env(project_root=tmp_path)
+    assert M.TierThresholds.from_settings(cfg) == M.TierThresholds(0.8, 6.5, 0.55)
+    monkeypatch.setenv("NFL_TIER_LEAN_MIN_WIN_PROB", "0.9")  # lean above lock is rejected
+    with pytest.raises(ValueError, match="Tier thresholds"):
+        Settings.from_env(project_root=tmp_path)
+
+
+def test_payload_records_and_is_validated_against_its_own_thresholds(league):
+    features, schedules = league
+    market = M.nflverse_market_probs(schedules)
+    loose = M.TierThresholds(0.75, 1.0, 0.55)
+    payload = M.predict_week(features, schedules, market, season=2026, week=6, now=NOW, thresholds=loose)
+    assert payload["model"]["tier_thresholds"] == {
+        "lock_min_win_prob": 0.75,
+        "value_edge_min_pct": 1.0,
+        "lean_min_win_prob": 0.55,
+    }
+    assert "1 percentage points" in payload["tier_rules"]["VALUE EDGE"]
+    M.validate_contract_b(payload)  # built under 1.0, valid under 1.0 even though settings say 8.0
+    tampered = copy.deepcopy(payload)
+    tampered["model"]["tier_thresholds"]["value_edge_min_pct"] = 50.0  # tiers no longer follow the stated rule
+    with pytest.raises(M.ContractError, match="tier_rules must describe|contradicts"):
+        M.validate_contract_b(tampered)
+    broken = copy.deepcopy(payload)
+    broken["model"]["tier_thresholds"] = {"lock_min_win_prob": 0.5, "value_edge_min_pct": 8.0, "lean_min_win_prob": 0.7}
+    with pytest.raises(M.ContractError, match="tier_thresholds"):
+        M.validate_contract_b(broken)
 
 
 def test_tiers_in_payload_are_directional(payload):
     for game in payload["games"]:
         side = game["pick"]["side"]
         if game["confidence_tier"] == "VALUE EDGE":
-            assert game["value_team"] == game["pick"]["team"] and game["model_edge_pct"] >= 5.0
+            assert game["value_team"] == game["pick"]["team"]
+            assert game["model_edge_pct"] >= payload["model"]["tier_thresholds"]["value_edge_min_pct"]
         if game["confidence_tier"] == "LOCK":
             assert game["model"][f"{side}_wp"] >= 0.5
         if game["value_team"] is not None and game["value_team"] != game["pick"]["team"]:

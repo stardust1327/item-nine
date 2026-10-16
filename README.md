@@ -8,7 +8,7 @@ The layout follows CLAUDE.md §3. Implemented so far: `config.py`, `src/ingest.p
 
 ```
 item-nine/
-├── CLAUDE.md                  # project rules (sections 1-3 checked in so far)
+├── CLAUDE.md                  # authoritative spec: invariants, Contracts A/B/C, env, exit codes
 ├── config.py                  # all settings: paths, seasons, cache policy, API keys, logging
 ├── requirements.txt
 ├── pyproject.toml             # pytest + ruff config
@@ -18,8 +18,9 @@ item-nine/
 ├── data/                      # git-ignored
 │   ├── raw/                   # pbp/, schedules/, rosters_weekly/, injuries/, odds/, _manifest.json
 │   ├── processed/             # features.parquet
-│   └── predictions/           # current_week.json (Contract B), weekly_report_enriched.json (Contract C), backtests
-├── reports/                   # weekly Markdown newsletters
+│   └── predictions/           # current_week.json (Contract B), weekly_report_enriched.json (Contract C),
+│                              # week_XX_YYYY_preds.json / week_XX_YYYY_enriched.json archives, backtests
+├── reports/                   # weekly Markdown newsletters (week_XX_YYYY.md)
 ├── src/
 │   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache, de-vig)
 │   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
@@ -76,8 +77,8 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
 - **Model.** `XGBClassifier(max_depth=4, learning_rate=0.03, n_estimators=250, subsample=0.8, colsample_bytree=0.8)`, frozen after training and wrapped in `CalibratedClassifierCV(method="sigmoid")`.
 - **Blend.** `final = w·market + (1-w)·model`. The market weight `w` is chosen by `scipy.optimize` to minimize Brier score on cross-fitted probabilities from the calibration season. It starts from 0.60, and 0.60 is the fallback.
 - **Market data.** The current week uses de-vigged Odds API consensus lines, then a saved snapshot, then nflverse lines. History uses nflverse closing lines.
-- **Output.** `data/predictions/current_week.json` (Contract B) holds, per game: the pick, final/model/market win probabilities, `model_edge_pct`, `value_team`, a tier, and the top 3 SHAP drivers.
-- **Tiers.** LOCK means the pick is at least 75% and the model also favors it. VALUE EDGE means the model is at least 5 points above the market on the pick. LEAN means at least 55%. Everything else is a COIN FLIP.
+- **Output.** `data/predictions/current_week.json` (Contract B, schema 1.2.0) holds, per game: the pick, final/model/market win probabilities, `model_edge_pct`, `value_team`, a tier, and the top 3 SHAP drivers. A copy is archived as `data/predictions/week_XX_YYYY_preds.json` so later weeks and seasons never overwrite it.
+- **Tiers.** LOCK means the pick is at least 75% and the model also favors it. VALUE EDGE means the model is at least 8 points above the market on the pick. LEAN means at least 55%. Everything else is a COIN FLIP. The thresholds are set with `NFL_TIER_LOCK_MIN_WIN_PROB`, `NFL_VALUE_EDGE_MIN_PCT` and `NFL_TIER_LEAN_MIN_WIN_PROB`. Each payload records the thresholds it was built with, and the validator checks tiers against those, so archived weeks stay valid when the settings change.
 - **Backtest output.** `data/predictions/backtest_report.json` and `backtest_predictions.parquet`. Pooled out-of-sample Brier for 2018–2026: model 0.233, market 0.211, blend 0.212.
 
 ## Scouting reports
@@ -90,7 +91,7 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
   - no other team or tier is mentioned
   - there is no hype or betting language
 - **Retries.** A rejected reply is sent back with the errors, up to 3 attempts. After that the game gets a deterministic template report, flagged in `report_meta`.
-- **Output.** `data/predictions/weekly_report_enriched.json` (Contract C: Contract B plus `report` and `report_meta` per game, re-validated) and `reports/week_XX_report.md`.
+- **Output.** `data/predictions/weekly_report_enriched.json` (Contract C: Contract B plus `report` and `report_meta` per game, re-validated), its archive `data/predictions/week_XX_YYYY_enriched.json`, and the newsletter `reports/week_XX_YYYY.md`.
 - **Exit codes.** 0 ok; 1 error, with nothing written (auth, unknown model, daily quota, bad input); 2 missing API key; 3 written, but no game got a Gemini write-up.
 
 ## Feature matrix

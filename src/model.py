@@ -43,7 +43,7 @@ import logging
 import math
 import sys
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -92,9 +92,31 @@ MIN_BLEND_GAMES: Final[int] = 100  # fewer validation games with a market line -
 
 Tier = Literal["LOCK", "VALUE EDGE", "LEAN", "COIN FLIP"]
 TIERS: Final[tuple[str, ...]] = ("LOCK", "VALUE EDGE", "LEAN", "COIN FLIP")
-LOCK_MIN_WIN_PROB: Final[float] = 0.75  # final win probability of the pick (and the model must favour it too)
-VALUE_EDGE_MIN_PCT: Final[float] = 5.0  # model above market on the pick side, in percentage points
-LEAN_MIN_WIN_PROB: Final[float] = 0.55
+
+
+@dataclass(frozen=True, slots=True)
+class TierThresholds:
+    """Confidence-tier cut-offs. Defaults come from settings (env ``NFL_TIER_LOCK_MIN_WIN_PROB``,
+    ``NFL_VALUE_EDGE_MIN_PCT``, ``NFL_TIER_LEAN_MIN_WIN_PROB``); each Contract B payload records the
+    values it was built with in ``model.tier_thresholds``."""
+
+    lock_min_win_prob: float = 0.75  # pick's final win probability (and the model must favour the pick)
+    value_edge_min_pct: float = 8.0  # model above the market on the pick side, percentage points
+    lean_min_win_prob: float = 0.55
+
+    @classmethod
+    def from_settings(cls, cfg: Settings = settings) -> TierThresholds:
+        return cls(cfg.tier_lock_min_win_prob, cfg.tier_value_edge_min_pct, cfg.tier_lean_min_win_prob)
+
+    def rules(self) -> dict[str, str]:
+        return {
+            "LOCK": f"pick win probability >= {self.lock_min_win_prob:.0%} and the model also favours the pick",
+            "VALUE EDGE": f"model rates the pick >= {self.value_edge_min_pct:g} percentage points above the market",
+            "LEAN": f"pick win probability >= {self.lean_min_win_prob:.0%}",
+            "COIN FLIP": "otherwise",
+        }
+
+
 TOP_DRIVERS: Final[int] = 3
 
 # Model-input values for venue flags that are unknown before kickoff. nflverse only
@@ -108,7 +130,7 @@ TOP_DRIVERS: Final[int] = 3
 MODEL_INPUT_DEFAULTS: Final[dict[str, float]] = {"is_outdoor": 0.0, "is_high_wind_outdoor": 0.0}
 
 CONTRACT_NAME: Final[str] = "B"
-CONTRACT_VERSION: Final[str] = "1.1.0"
+CONTRACT_VERSION: Final[str] = "1.2.0"
 GAME_STATUSES: Final[tuple[str, ...]] = ("scheduled", "in_progress", "final")
 # nflverse_close: line for a game that has kicked off; nflverse_line: pre-game line as last fetched.
 MARKET_SOURCES: Final[tuple[str, ...]] = ("odds_api", "odds_api_snapshot", "nflverse_close", "nflverse_line")
@@ -761,23 +783,29 @@ def _algorithm_description() -> str:
     return f'XGBClassifier + CalibratedClassifierCV(method="{CALIBRATION_METHOD}")'
 
 
-def confidence_tier(pick_win_prob: float, model_edge_pct: float | None, model_pick_win_prob: float) -> Tier:
-    """Map a pick to a tier (first match wins).
+def confidence_tier(
+    pick_win_prob: float,
+    model_edge_pct: float | None,
+    model_pick_win_prob: float,
+    thresholds: TierThresholds | None = None,
+) -> Tier:
+    """Map a pick to a tier (first match wins; defaults in brackets, see :class:`TierThresholds`).
 
-    LOCK        the pick's final win probability is >= 75% and the model also favours the pick
-    VALUE EDGE  the model rates the pick >= 5 percentage points above the market (``model_edge_pct >= +5``)
-    LEAN        the pick's final win probability is >= 55%
+    LOCK        the pick's final win probability is >= lock_min_win_prob [75%] and the model also favours the pick
+    VALUE EDGE  the model rates the pick >= value_edge_min_pct [8] percentage points above the market
+    LEAN        the pick's final win probability is >= lean_min_win_prob [55%]
     COIN FLIP   everything else
 
     The edge is directional. When the model rates the *other* side above the
     market, ``value_team`` names that side, and the disagreement never upgrades
     the pick's tier.
     """
-    if pick_win_prob >= LOCK_MIN_WIN_PROB and model_pick_win_prob >= 0.5:
+    t = thresholds or TierThresholds.from_settings()
+    if pick_win_prob >= t.lock_min_win_prob and model_pick_win_prob >= 0.5:
         return "LOCK"
-    if model_edge_pct is not None and model_edge_pct >= VALUE_EDGE_MIN_PCT:
+    if model_edge_pct is not None and model_edge_pct >= t.value_edge_min_pct:
         return "VALUE EDGE"
-    if pick_win_prob >= LEAN_MIN_WIN_PROB:
+    if pick_win_prob >= t.lean_min_win_prob:
         return "LEAN"
     return "COIN FLIP"
 
@@ -829,7 +857,10 @@ def _flag(value: Any) -> bool | None:
 
 
 def _decision_fields(
-    model_pair: dict[str, float], market_pair: dict[str, float] | None, final_pair: dict[str, float]
+    model_pair: dict[str, float],
+    market_pair: dict[str, float] | None,
+    final_pair: dict[str, float],
+    thresholds: TierThresholds | None = None,
 ) -> dict[str, Any]:
     """Pick, edge, value side and tier, all derived from the *published* (rounded) probabilities.
 
@@ -849,7 +880,7 @@ def _decision_fields(
         "model_edge_pct": edge_pick,
         "value_side": value_side,
         "value_edge_pct": None if value_side is None else abs(edge_home),
-        "tier": confidence_tier(pick_wp, edge_pick, model_pair[f"{side}_wp"]),
+        "tier": confidence_tier(pick_wp, edge_pick, model_pair[f"{side}_wp"], thresholds),
     }
 
 
@@ -860,6 +891,7 @@ def build_payload(
     season: int,
     week: int,
     now: datetime,
+    thresholds: TierThresholds | None = None,
 ) -> dict[str, Any]:
     """Assemble the Contract B payload (``schema_version`` :data:`CONTRACT_VERSION`).
 
@@ -877,6 +909,7 @@ def build_payload(
     * ``imputed_inputs``: venue inputs unknown before kickoff that took :data:`MODEL_INPUT_DEFAULTS`.
     """
     now = _as_utc(now)
+    thresholds = thresholds or TierThresholds.from_settings()
     rows = week_rows.sort("kickoff_utc", "game_id")
     model_p = fold.model.predict_proba(rows)
     market_p = _column(rows, "market_home_wp")
@@ -892,7 +925,7 @@ def build_payload(
         model_pair = _probability_pair(model_p[i])
         market_pair = _probability_pair(market_p[i]) if has_market else None
         final_pair = _probability_pair(final_p[i])
-        decision = _decision_fields(model_pair, market_pair, final_pair)
+        decision = _decision_fields(model_pair, market_pair, final_pair, thresholds)
         side = decision["side"]
         status = _game_status(row, now)
         games.append(
@@ -965,13 +998,9 @@ def build_payload(
                 "n_games": blend.n_games,
             },
             "input_defaults": dict(MODEL_INPUT_DEFAULTS),
+            "tier_thresholds": asdict(thresholds),
         },
-        "tier_rules": {
-            "LOCK": f"pick win probability >= {LOCK_MIN_WIN_PROB:.0%} and the model also favours the pick",
-            "VALUE EDGE": f"model rates the pick >= {VALUE_EDGE_MIN_PCT:g} percentage points above the market",
-            "LEAN": f"pick win probability >= {LEAN_MIN_WIN_PROB:.0%}",
-            "COIN FLIP": "otherwise",
-        },
+        "tier_rules": thresholds.rules(),
         "games": games,
     }
 
@@ -1004,6 +1033,16 @@ def _parse_iso(x: Any) -> datetime | None:
     except ValueError:
         return None
     return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+
+
+def _parse_thresholds(raw: Any) -> TierThresholds | None:
+    keys = ("lock_min_win_prob", "value_edge_min_pct", "lean_min_win_prob")
+    if not isinstance(raw, dict) or set(raw) != set(keys) or not all(_is_num(raw[k]) for k in keys):
+        return None
+    t = TierThresholds(**{k: float(raw[k]) for k in keys})
+    if not (0.5 <= t.lean_min_win_prob <= t.lock_min_win_prob <= 1.0 and 0.0 < t.value_edge_min_pct <= 100.0):
+        return None
+    return t
 
 
 def _close(a: Any, b: Any, tol: float) -> bool:
@@ -1054,8 +1093,17 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
     check(_is_int(week), "week must be an int")
 
     weight = None
+    thresholds: TierThresholds | None = None
     model = payload.get("model")
     if isinstance(model, dict):
+        thresholds = _parse_thresholds(model.get("tier_thresholds"))
+        check(
+            thresholds is not None,
+            "model.tier_thresholds must hold lock_min_win_prob, value_edge_min_pct, lean_min_win_prob "
+            "with 0.5 <= lean <= lock <= 1 and 0 < value_edge <= 100",
+        )
+        if thresholds is not None:
+            check(payload.get("tier_rules") == thresholds.rules(), "tier_rules must describe model.tier_thresholds")
         weight = model.get("market_weight")
         check(_is_prob(weight), "model.market_weight must be in [0, 1]")
         check(model.get("market_weight_source") in ("optimized", "default"), "model.market_weight_source invalid")
@@ -1156,7 +1204,7 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
             )
         elif market is None:
             check(game["final"] == game["model"], f"{where}: final must equal model when there is no market line")
-        expected = _decision_fields(game["model"], market, game["final"])
+        expected = _decision_fields(game["model"], market, game["final"], thresholds)
         pick = game["pick"]
         if not isinstance(pick, dict):
             problems.append(f"{where}: pick must be an object")
@@ -1188,7 +1236,7 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
             )
         check(game["confidence_tier"] in TIERS, f"{where}: confidence_tier must be one of {TIERS}")
         if _is_prob(pick.get("win_prob")) and (edge is None or _is_num(edge)):
-            tier = confidence_tier(pick["win_prob"], edge, game["model"][f"{expected['side']}_wp"])
+            tier = confidence_tier(pick["win_prob"], edge, game["model"][f"{expected['side']}_wp"], thresholds)
             check(
                 game["confidence_tier"] == tier,
                 f"{where}: confidence_tier {game['confidence_tier']!r} contradicts tier_rules (expected {tier!r})",
@@ -1239,9 +1287,11 @@ def predict_week(
     week: int,
     now: datetime,
     random_state: int = RANDOM_STATE,
+    thresholds: TierThresholds | None = None,
 ) -> dict[str, Any]:
     """Train the production fold for ``season`` and return the validated Contract B payload for ``week``."""
     now = _as_utc(now)
+    thresholds = thresholds or TierThresholds.from_settings()
     history = features.join(
         nflverse_market_probs(schedules).select("game_id", "market_home_wp"), on="game_id", how="left"
     )
@@ -1255,7 +1305,7 @@ def predict_week(
     if week_rows.is_empty():
         raise ModelError(f"no feature rows for {season} week {week}; rebuild features")
     _warn_on_serving_missingness(_season_rows(data, split.train_seasons), week_rows)
-    payload = build_payload(week_rows, fold, season=season, week=week, now=now)
+    payload = build_payload(week_rows, fold, season=season, week=week, now=now, thresholds=thresholds)
     validate_contract_b(payload)
     return payload
 
@@ -1290,9 +1340,13 @@ def _warn_on_serving_missingness(train: pl.DataFrame, serving: pl.DataFrame, *, 
             )
 
 
-def write_payload(payload: dict[str, Any], path: Path) -> Path:
-    ingest.write_text_atomic(json.dumps(payload, indent=2, allow_nan=False) + "\n", path)
-    logger.info("Wrote %s (%d games)", path, len(payload["games"]))
+def write_payload(payload: dict[str, Any], path: Path, archive: Path | None = None) -> Path:
+    """Write Contract B to ``path`` (latest run) and, if given, to its versioned ``archive`` copy."""
+    text = json.dumps(payload, indent=2, allow_nan=False) + "\n"
+    ingest.write_text_atomic(text, path)
+    if archive is not None:
+        ingest.write_text_atomic(text, archive)
+    logger.info("Wrote %s%s (%d games)", path, f" and {archive.name}" if archive else "", len(payload["games"]))
     return path
 
 
@@ -1320,7 +1374,7 @@ def run_current_week(
     )
     payload = predict_week(features, schedules, market, season=season, week=week, now=now)
     if write:
-        write_payload(payload, cfg.current_week_json)
+        write_payload(payload, cfg.current_week_json, cfg.preds_archive_json(season, week))
     return payload
 
 

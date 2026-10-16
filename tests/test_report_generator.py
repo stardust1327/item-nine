@@ -373,7 +373,7 @@ def test_gemini_writer_error_handling(cfg):
 # --------------------------------------------------------------------------- #
 def test_enrich_produces_valid_contract_c(payload, cfg):
     writer = GroundedWriter()
-    contract_c = R.enrich_payload(payload, writer, cfg=cfg, now=NOW, newsletter_path="reports/week_06_report.md")
+    contract_c = R.enrich_payload(payload, writer, cfg=cfg, now=NOW, newsletter_path="reports/week_06_2026.md")
     R.validate_contract_c(contract_c)
     assert writer.calls == len(payload["games"])
     assert (contract_c["contract"], contract_c["season"], contract_c["week"]) == ("C", 2026, 6)
@@ -444,8 +444,10 @@ def test_run_report_writes_contract_c_and_newsletter(payload, cfg):
     saved = json.loads(cfg.enriched_report_json.read_text())
     R.validate_contract_c(saved)
     assert saved == contract_c
-    md_path = cfg.reports_dir / "week_06_report.md"
-    assert contract_c["newsletter_path"] == "reports/week_06_report.md" and md_path.exists()
+    md_path = cfg.reports_dir / "week_06_2026.md"  # season in the name: seasons never overwrite each other
+    assert contract_c["newsletter_path"] == "reports/week_06_2026.md" and md_path.exists()
+    archived = json.loads((cfg.predictions_dir / "week_06_2026_enriched.json").read_text())
+    assert archived == saved  # versioned Contract C copy
     md = md_path.read_text()
     assert md.startswith("# NFL Week 6 Scouting Report — 2026 Season")
     for game in contract_c["games"]:

@@ -1,38 +1,273 @@
-# Claude.md > nfl-prediction-engine  
-  
-# CLAUDE.md — NFL Prediction Engine & Weekly Scouting Report App  
-  
-## 1. Project Overview  
-A production-grade NFL game prediction engine and automated weekly scouting report web application. The system ingests play-by-play data via `nflreadpy` and live sportsbook lines via The Odds API, engineers leak-free rolling efficiency metrics (EPA, Success Rate, CPOE), trains a calibrated walk-forward XGBoost model, blends model probabilities with de-vigged market baselines, translates predictions into plain-English scouting reports using an LLM with strict Pydantic validation, and serves the output in a Streamlit dashboard.  
-  
-## 2. Tech Stack & Library Rules  
-- **Language:** Python 3.11+  
-- **NFL Data Source:** `nflreadpy` (CRITICAL: **NEVER** import or use `nfl_data_py`, which was deprecated in late 2025).  
-- **Data Manipulation:** `pandas` (with `pyarrow` backend for Parquet storage) or `polars`.  
-- **Machine Learning:** `xgboost`, `scikit-learn` (`CalibratedClassifierCV`, `brier_score_loss`, `log_loss`), `scipy.optimize`, `shap`.  
-- **LLM & Validation:** `pydantic>=2.0`, `google-genai` (default: `gemini-2.5-flash`) or `anthropic` (`claude-sonnet-4-20250514` / `claude-opus-4-20250514`).  
-- **Frontend:** `streamlit`  
-- **Testing:** `pytest`  
-  
-## 3. Repository Structure  
-```text  
-nfl-predictor/  
-├── CLAUDE.md  
-├── config.py                        # Paths, constants, hyperparams, team mappings  
-├── requirements.txt  
-├── .env.example                     # ODDS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY  
-├── run_weekly.py                    # End-to-end CLI orchestrator  
-├── app.py                           # Streamlit frontend dashboard  
-├── data/  
-│   ├── raw/                         # Cached Parquet files by season & live odds  
-│   ├── processed/                   # Leak-free engineered feature matrices  
-│   └── predictions/                 # JSON outputs for current week & historical backtests  
-├── reports/                         # Exported weekly Markdown reports (week_XX_YYYY.md)  
-├── src/  
-│   ├── __init__.py  
-│   ├── ingest.py                    # nflreadpy & The Odds API fetchers + vig stripping  
-│   ├── features.py                  # Garbage-time filter, EWMA, prior regression, differentials  
-│   ├── model.py                     # Walk-forward XGBoost, calibration, market ensemble, SHAP  
-│   └── report_generator.py          # Pydantic LLM translator & Markdown compiler  
-└── tests/  
-    └── test_leakage.py              # Automated temporal leakage & probability bounds tests  
+# CLAUDE.md — item-nine: NFL Prediction Engine & Weekly Scouting Report
+
+This document is the authoritative architecture, data-contract and engineering specification for `item-nine`.
+Contributors, agents and reviewers must follow the schemas, invariants and rules below.
+
+The code is the executable form of this document. Every contract has a validator, named below. Producers run it
+before writing, and consumers may run it after reading. Any change to a contract, path or invariant must update this
+file in the same PR.
+
+---
+
+## 1. System overview
+
+The pipeline is six sequential components. Each writes the input of the next.
+
+| # | Component | File | Output |
+|---|---|---|---|
+| 1 | Ingestion | `src/ingest.py` | `data/raw/`: nflverse Parquet cache plus `_manifest.json`; Odds API snapshots |
+| 2 | Feature engineering | `src/features.py` | **Contract A**: `data/processed/features.parquet` |
+| 3 | Model and live odds pricing | `src/model.py` (the Odds API client and de-vig live in `src/ingest.py`) | **Contract B** |
+| 4 | Report generator | `src/report_generator.py` | **Contract C** and the Markdown newsletter |
+| 5 | Weekly orchestrator | `run_weekly.py` | Runs 1→4 with exit-code propagation, cache controls and degraded-run handling |
+| 6 | Dashboard | `app.py` | Streamlit view of Contracts B and C, archives and backtest metrics |
+
+## 2. Directory structure
+
+```text
+item-nine/
+├── CLAUDE.md
+├── README.md
+├── pyproject.toml / requirements.txt
+├── .env.example                          # ODDS_API_KEY, GEMINI_API_KEY (+ optional overrides)
+├── config.py                             # Settings: paths, seasons, cache policy, API/LLM settings, tier thresholds
+├── run_weekly.py                         # Module 5
+├── app.py                                # Module 6
+├── src/
+│   ├── __init__.py
+│   ├── ingest.py                         # Module 1 (+ Odds API client, de-vig, snapshot writer)
+│   ├── features.py                       # Module 2
+│   ├── model.py                          # Module 3
+│   └── report_generator.py               # Module 4
+├── data/                                 # git-ignored
+│   ├── raw/
+│   │   ├── _manifest.json                # fetch time and finality of every cached file
+│   │   ├── pbp/ schedules/ rosters_weekly/ injuries/
+│   │   └── odds/YYYY/odds_YYYY_wkXX_<UTC stamp>_{books,consensus}.parquet   # Odds API snapshots
+│   ├── processed/
+│   │   └── features.parquet              # Contract A
+│   └── predictions/
+│       ├── current_week.json             # Contract B (latest run)
+│       ├── week_XX_YYYY_preds.json       # Contract B (versioned archive)
+│       ├── weekly_report_enriched.json   # Contract C (latest run)
+│       ├── week_XX_YYYY_enriched.json    # Contract C (versioned archive)
+│       ├── backtest_report.json          # walk-forward metrics
+│       └── backtest_predictions.parquet  # out-of-sample predictions
+├── reports/
+│   └── week_XX_YYYY.md                   # Markdown newsletter, e.g. week_06_2026.md (generated, git-ignored)
+└── tests/
+    ├── conftest.py                       # shared synthetic league
+    ├── test_ingest.py                    # Module 1
+    ├── test_leakage.py                   # Module 2 leakage, probability bounds, project-wide guards
+    ├── test_model.py                     # Module 3
+    ├── test_report_generator.py          # Module 4
+    ├── test_run_weekly.py                # Module 5
+    └── test_app.py                       # Module 6
+```
+
+`XX` is the zero-padded week, so week 6 is `06`. `YYYY` is the NFL season, which is the year the season starts. Paths
+are built only by `config.Settings` (`preds_archive_json`, `enriched_archive_json`, `newsletter_md`). Never hard-code
+them elsewhere.
+
+## 3. Tech stack and library rules
+
+- **Python 3.11+**. Lint and format with `ruff`, line length 120.
+- **NFL data: `nflreadpy` only.** **NEVER** import or use `nfl_data_py`; it was deprecated in 2025. Enforced by
+  `tests/test_leakage.py::test_nfl_data_py_is_never_used`.
+- **Data:** `polars`, with Parquet via `pyarrow`.
+- **ML:** `xgboost`, `scikit-learn` (`CalibratedClassifierCV`, `brier_score_loss`, `log_loss`) and `scipy.optimize`.
+  Drivers are SHAP values from XGBoost's native TreeSHAP (`pred_contribs`).
+- **LLM:** `google-genai`, default model `gemini-2.5-flash`. All output is validated with `pydantic>=2`.
+- **Frontend:** `streamlit`. **Tests:** `pytest`.
+- **Secrets:** `.env`, which is git-ignored, holds `ODDS_API_KEY` and `GEMINI_API_KEY`. Never commit, print or log keys;
+  the Odds API client redacts them from errors.
+
+## 4. Modeling invariants
+
+Each invariant has tests; breaking one is a blocking defect.
+
+1. **Garbage time.** Drop play-by-play rows with `qtr == 4` and `wp < 0.05` or `wp > 0.95` before computing any metric.
+   Rows with a null `wp` are kept.
+2. **Team-game metrics.** Offensive pass and rush EPA per play, defensive pass and rush EPA allowed per play, offensive
+   early-down (1st/2nd) success rate, and the starting QB's CPOE. Plays follow the nflfastR convention
+   (`pass == 1 | rush == 1`), with 2-point attempts excluded.
+3. **Zero temporal leakage.** Within each team-season, ordered by kickoff, apply EWMA (half-life 4 games), then
+   forward-fill, then `shift(1)`. A week N row sees only weeks 1..N-1. A game's own box score never appears in its
+   features.
+4. **Weeks 1–4 prior.** Blend the team's play-weighted Season Y-1 value with the in-season EWMA. The prior gets 100% in
+   week 1, 75% in week 2, 50% in week 3, 25% in week 4, and 0% from week 5.
+5. **Team codes.** `OAK→LV`, `SD→LAC` and `STL→LA` everywhere, so joins and priors survive relocations.
+6. **Walk-forward validation.** To score season S, train on all seasons from 2016 through S-2, calibrate on S-1 and
+   evaluate on S. Production uses the same recipe. **Never** use a random split; `train_test_split` is banned by a test.
+7. **Model.** `XGBClassifier(max_depth=4, learning_rate=0.03, n_estimators=250, subsample=0.8, colsample_bytree=0.8)`,
+   frozen and wrapped in `CalibratedClassifierCV(method="sigmoid")`, which is fit on S-1.
+8. **Train/serve consistency.** Venue inputs unknown before kickoff (wind, retractable-roof state) take
+   `model.MODEL_INPUT_DEFAULTS` identically in training and serving. Contract A keeps them null. Drivers describe only
+   observed inputs.
+9. **Market blend.** `final = w·market + (1-w)·model`. `w ∈ [0, 1]` is chosen by `scipy.optimize.minimize` to minimize
+   Brier score on cross-fitted calibration-season probabilities. It starts at 0.60, and 0.60 is also the fallback.
+10. **Market data.** De-vig is multiplicative (`p / Σp`).
+    - History uses nflverse closing moneylines.
+    - The current week uses, in priority order: the live Odds API consensus (median of books), then the latest snapshot
+      saved **at or before** prediction time, then nflverse lines.
+    - A line is `nflverse_close` only if it was observed after kickoff. Otherwise it is `nflverse_line`, stamped with its
+      fetch time.
+11. **Confidence tiers.** These are directional and use configurable thresholds (Section 7); the first match wins.
+
+    | Tier | Rule (defaults) |
+    |---|---|
+    | `LOCK` | The pick's final win probability is ≥ `lock_min_win_prob` (0.75), **and** the model also favors the pick. |
+    | `VALUE EDGE` | The model rates the **pick** ≥ `value_edge_min_pct` (8.0) percentage points above the market. |
+    | `LEAN` | The pick's final win probability is ≥ `lean_min_win_prob` (0.55). |
+    | `COIN FLIP` | Everything else. |
+
+    The model's disagreement *against* the pick never upgrades the pick's tier; `value_team` names the side the model
+    prefers. Tiers are derived from the published, rounded values, so anyone can recompute them from the JSON.
+
+## 5. Data contracts
+
+### Contract A — `data/processed/features.parquet`
+
+One row per scheduled game, played or upcoming. The column groups are defined in `src/features.py`:
+
+| Group | Columns |
+|---|---|
+| `ID_COLUMNS` | `game_id, season, week, game_type, kickoff_utc, home_team, away_team` |
+| `FEATURE_COLUMNS` (22, model inputs, pre-game only) | `{home,away}_{off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa, off_early_down_sr, qb_cpoe}_pre`, `net_pass_epa_mismatch, net_rush_epa_mismatch, diff_early_down_sr, diff_qb_cpoe, net_rest_days, is_divisional, is_neutral_site, is_outdoor, is_high_wind_outdoor, prior_weight` |
+| `REFERENCE_COLUMNS` | `spread_line`: the closing line, used for benchmarking only and **never** as a model input |
+| `LABEL_COLUMNS` | `home_score, away_score, result, total, home_win` (null for unplayed games and ties) |
+
+Validated by `tests/test_leakage.py`. Perturbing a game's own play-by-play or score must leave its features
+bit-identical, and rebuilding every game from history cut at its kickoff must match the full build.
+
+### Contract B — weekly predictions (schema `1.2.0`)
+
+Written to `data/predictions/current_week.json` (latest run) and `week_XX_YYYY_preds.json` (archive). Validated by
+`src.model.validate_contract_b`.
+
+| Field | Type / meaning |
+|---|---|
+| `contract`, `schema_version` | `"B"`, `"1.2.0"` |
+| `generated_at` | ISO-8601 UTC prediction time |
+| `season`, `week` | int |
+| `model` | Fields:<br>`algorithm` and `hyperparameters`<br>`train_seasons` (all ≤ season-2)<br>`calibration_season` (= season-1)<br>`market_weight` ∈ [0,1] and `market_weight_source` (`optimized` or `default`)<br>`weight_fit`, an in-sample Brier summary<br>`input_defaults`<br>`tier_thresholds` {`lock_min_win_prob`, `value_edge_min_pct`, `lean_min_win_prob`} |
+| `tier_rules` | {tier → human-readable rule}; must match `model.tier_thresholds` |
+| `games[]` | One object per game of the week (fields below) |
+
+Per game:
+
+| Field | Type / meaning |
+|---|---|
+| `game_id`, `season`, `week`, `game_type` | nflverse identifiers. `game_type` is `REG`, `WC`, `DIV`, `CON` or `SB`. |
+| `kickoff_utc`, `status` | ISO-8601. `status` is `scheduled` (kickoff after `generated_at`), `in_progress` or `final`. |
+| `home_team`, `away_team` | nflverse abbreviations |
+| `venue` | {`is_neutral_site`, `is_outdoor`, `is_high_wind`, `is_divisional`}: bool or null (null = unknown before kickoff) |
+| `net_rest_days` | int or null (home minus away) |
+| `market` | null when there is no line. Otherwise:<br>`home_wp`, `away_wp` (de-vigged)<br>`home_spread` (sportsbook sign: negative = home favored)<br>`source` (`odds_api`, `odds_api_snapshot`, `nflverse_line` or `nflverse_close`)<br>`method` (`h2h`, `spread_implied` or `nflverse_moneyline`)<br>`books`<br>`as_of` |
+| `model`, `final` | {`home_wp`, `away_wp`}, summing to 1. `final` = blend at `market_weight`, or `model` when `market` is null. |
+| `pick` | {`team`, `side`, `win_prob`}: the side `final` favors |
+| `model_edge_pct` | `100·(model − market)` on the pick side, in percentage points; null without a market line |
+| `value_team`, `value_edge_pct` | The side the model rates above the market, and by how much |
+| `confidence_tier` | `LOCK`, `VALUE EDGE`, `LEAN` or `COIN FLIP` (Section 4.11) |
+| `top_drivers[]` | ≤ 3 objects {`feature`, `label`, `value`, `impact_logit`, `favors`}, ordered by abs(`impact_logit`); observed inputs only |
+| `imputed_inputs[]` | Venue inputs that took `MODEL_INPUT_DEFAULTS` |
+| `result` | {`home_score`, `away_score`} when `final`, otherwise null |
+
+### Contract C — enriched weekly report (schema `1.0.0`)
+
+Written to `data/predictions/weekly_report_enriched.json` (latest run) and `week_XX_YYYY_enriched.json` (archive).
+Validated by `src.report_generator.validate_contract_c`, which also re-validates the embedded Contract B and
+re-grounds every report against its own game.
+
+| Field | Type / meaning |
+|---|---|
+| `contract`, `schema_version`, `generated_at` | `"C"`, `"1.0.0"`, ISO-8601 |
+| `season`, `week`, `model`, `tier_rules` | Copied from Contract B |
+| `source` | {`contract`: `"B"`, `schema_version`, `generated_at`}: the predictions this report was built from |
+| `generator` | {`provider`, `model`, `mode` (`llm` or `template`), `temperature`, `max_attempts`} |
+| `summary` | {`n_games`, `n_llm`, `n_template`, `tiers`: {tier → count}} |
+| `newsletter_path` | Repository-relative path of the newsletter |
+| `games[]` | Each Contract B game, plus the two objects below |
+| `games[].report` | {`headline`, `the_pick_summary`, `key_mismatch`, `risk_factor`}: validated prose |
+| `games[].report_meta` | {`generator` (model name or `template`), `attempts`, `fallback_reason`, `validation_errors[]`} |
+
+A run is **degraded** when `generator.mode == "llm"` and `summary.n_llm == 0`. The orchestrator signals this with
+exit code 3 and the dashboard shows a banner.
+
+### Newsletter — `reports/week_XX_YYYY.md`
+
+The newsletter contains:
+- a glance table (kickoff in ET, pick, win probability, tier, model vs market, result)
+- one section per tier, with each game's four report fields
+- an "already played" section
+- the tier rules
+- the walk-forward track record
+- a not-betting-advice disclaimer
+
+Displayed numbers are truncated, so they never round across a tier threshold.
+
+## 6. LLM rules (Module 4)
+
+- The LLM sees only the per-game fact sheet built by `game_facts`. It is never given raw logits or numbers the
+  validator can't check.
+- `ScoutingReport` (Pydantic) enforces two kinds of rules.
+  - **Format:** length limits; one paragraph of plain prose with no markdown, HTML, code, links or URLs; text
+    Unicode-normalized first.
+  - **Grounding**, against the fact sheet:
+    - the pick, its tier and its final win probability are stated
+    - no other tier or outside team is named
+    - the headline names a team in the game
+    - every percentage matches a fact, at 1 decimal or rounded to a whole number
+    - no hype or betting language
+- **Retries:** a rejected reply is re-prompted with the errors, up to `LLM_MAX_ATTEMPTS`. After that the game falls back
+  to the deterministic template, which is flagged in `report_meta`.
+- **Errors:**
+  - Auth failures, unknown models, location errors, 400 request errors and the daily quota abort the run before
+    anything is written.
+  - Per-minute 429s and 5xx errors are retried.
+
+## 7. Configuration
+
+All settings live in `config.Settings`, populated from the environment or `.env`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ODDS_API_KEY` | — | Required for live odds |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | — | Required for LLM reports |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model |
+| `NFL_VALUE_EDGE_MIN_PCT` | `8.0` | VALUE EDGE threshold, in percentage points |
+| `NFL_TIER_LOCK_MIN_WIN_PROB` | `0.75` | LOCK threshold |
+| `NFL_TIER_LEAN_MIN_WIN_PROB` | `0.55` | LEAN threshold |
+| `NFL_START_SEASON` | `2016` | First cached season |
+| `ODDS_BOOKMAKERS` | 8 major US books | Books used for the consensus (≤ 10 books counts as 1 region of credits) |
+| `LLM_MAX_ATTEMPTS`, `LLM_TEMPERATURE`, `LLM_MAX_CONCURRENCY`, `GEMINI_THINKING_BUDGET` | 3, 0.4, 4, model default | Generation controls |
+| `NFL_DATA_DIR`, `NFL_MODELS_DIR`, `NFL_LOGS_DIR` | Under the repo | Path overrides |
+
+## 8. Commands and exit codes
+
+| Command | What it does |
+|---|---|
+| `python -m src.ingest [--odds]` | Sync the nflverse cache. `--odds` also pulls live odds, at 2 credits per call. |
+| `python -m src.features` | Build Contract A |
+| `python -m src.model [backtest\|predict\|all] [--no-odds]` | Walk-forward backtest and/or Contract B. `--no-odds` uses a snapshot or nflverse lines instead of a live pull. |
+| `python -m src.report_generator [--template] [--strict]` | Contract C and the newsletter |
+| `python run_weekly.py [--season S --week W] [--use-cached-odds] [--skip-llm]` | The full weekly pipeline |
+| `streamlit run app.py` | The dashboard |
+
+The report generator and orchestrator share these exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | OK |
+| 1 | Error. Nothing downstream ran; the failing stage wrote nothing. |
+| 2 | Missing Gemini API key |
+| 3 | Degraded: outputs written, but no game got an LLM write-up |
+
+## 9. Testing and review rules
+
+- `pytest` and `ruff check` must pass before every push.
+- Every bug fix lands with a regression test.
+- Tests never call live APIs; they use fake clients that raise the SDKs' real error types. Tests that need the real
+  cache skip when it is absent.
+- Routine runs use cached odds (`--use-cached-odds` / `--no-odds`). The Odds API bills credits per call.
+- Contract changes bump `schema_version`, update the validator and this file together, and add validator mutation tests.

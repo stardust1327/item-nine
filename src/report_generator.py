@@ -14,7 +14,7 @@ Pipeline
        model and flagged in ``report_meta``.
     4. Write ``data/predictions/weekly_report_enriched.json`` (Contract C =
        Contract B plus ``report`` / ``report_meta`` per game, re-validated) and
-       ``reports/week_XX_report.md``.
+       ``reports/week_XX_YYYY.md``.
 
 CLI::
 
@@ -58,7 +58,6 @@ CONTRACT_NAME: Final[str] = "C"
 CONTRACT_VERSION: Final[str] = "1.0.0"
 PROVIDER: Final[str] = "google-genai"
 TEMPLATE_GENERATOR: Final[str] = "template"
-NEWSLETTER_NAME: Final[str] = "week_{week:02d}_report.md"
 TIER_ORDER: Final[tuple[str, ...]] = M.TIERS  # LOCK, VALUE EDGE, LEAN, COIN FLIP
 ALWAYS_ALLOWED_PERCENTAGES: Final[frozenset[float]] = frozenset({50.0})  # "a 50/50 game", "50% coin flip"
 # Hype and betting calls, matched on normalised text (NFKC, ASCII quotes and dashes, no zero-width characters).
@@ -1293,8 +1292,9 @@ def _game_section(g: dict[str, Any]) -> list[str]:
 STALE_AFTER: Final = timedelta(days=3)
 
 
-def newsletter_path(cfg: Settings, week: int) -> Path:
-    return cfg.reports_dir / NEWSLETTER_NAME.format(week=week)
+def newsletter_path(cfg: Settings, season: int, week: int) -> Path:
+    """reports/week_XX_YYYY.md (CLAUDE.md section 2)."""
+    return cfg.newsletter_md(season, week)
 
 
 def _load_backtest(cfg: Settings) -> dict[str, Any] | None:
@@ -1348,7 +1348,7 @@ def run_report(
         writer = GeminiReportWriter(cfg=cfg)
     if mode == "template":
         writer = None
-    md_path = newsletter_path(cfg, payload["week"])
+    md_path = newsletter_path(cfg, payload["season"], payload["week"])
     rel_md = str(md_path.relative_to(cfg.project_root)) if md_path.is_relative_to(cfg.project_root) else str(md_path)
 
     started = time.perf_counter()
@@ -1365,9 +1365,12 @@ def run_report(
         summary["n_template"],
     )
     if write:
-        ingest.write_text_atomic(json.dumps(contract_c, indent=2, allow_nan=False) + "\n", cfg.enriched_report_json)
+        text = json.dumps(contract_c, indent=2, allow_nan=False) + "\n"
+        archive = cfg.enriched_archive_json(payload["season"], payload["week"])
+        ingest.write_text_atomic(text, cfg.enriched_report_json)
+        ingest.write_text_atomic(text, archive)
         ingest.write_text_atomic(render_newsletter(contract_c, _load_backtest(cfg)), md_path)
-        logger.info("Wrote %s and %s", cfg.enriched_report_json, md_path)
+        logger.info("Wrote %s, %s and %s", cfg.enriched_report_json, archive.name, md_path)
     return contract_c
 
 
