@@ -4,7 +4,7 @@ NFL Game Prediction Engine and Weekly Scouting Report web app (Python 3.11+).
 
 ## Project layout
 
-Implemented so far: `config.py`, `src/ingest.py`, `src/features.py` and their tests. Everything else in the tree below is the planned layout.
+Implemented so far: `config.py`, `src/ingest.py`, `src/features.py`, `src/model.py` and their tests. Everything else in the tree below is the planned layout.
 
 ```
 item-nine/
@@ -15,11 +15,7 @@ item-nine/
 ├── src/
 │   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache)
 │   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
-│   ├── models/
-│   │   ├── train.py           # XGBoost, walk-forward CV by season/week
-│   │   ├── calibrate.py       # isotonic / Platt on out-of-fold predictions
-│   │   ├── predict.py         # current-week win probabilities
-│   │   └── evaluate.py        # log loss, Brier, ECE, model vs. market baseline
+│   ├── model.py               # walk-forward XGBoost + sigmoid calibration + market blend -> current_week.json
 │   ├── market/
 │   │   └── edges.py           # model vs. market_home_wp, fractional Kelly sizing
 │   └── reports/
@@ -30,7 +26,8 @@ item-nine/
 ├── data/                      # git-ignored
 │   ├── raw/                   # pbp/, schedules/, rosters_weekly/, injuries/, odds/, _manifest.json
 │   ├── interim/
-│   └── processed/             # feature matrices
+│   ├── processed/             # feature matrices
+│   └── predictions/           # current_week.json (Contract B), backtest report + predictions
 ├── models/                    # trained artifacts (git-ignored)
 ├── logs/
 ├── notebooks/
@@ -48,6 +45,7 @@ python -m src.ingest               # first run downloads 2016-current (~30s, ~13
 python -m src.ingest               # later runs only refresh what is stale
 python -m src.ingest --odds        # also pull current-week consensus market odds
 python -m src.features             # build data/processed/features.parquet (<1s)
+python -m src.model                # walk-forward backtest + data/predictions/current_week.json (~10s)
 python -m pytest
 ```
 

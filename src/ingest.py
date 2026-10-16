@@ -140,7 +140,7 @@ def write_parquet_atomic(df: pl.DataFrame, path: Path) -> None:
         raise
 
 
-def _atomic_write_text(text: str, path: Path) -> None:
+def write_text_atomic(text: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
     try:
@@ -243,7 +243,7 @@ class CacheManifest:
             "updated_at": utc_now().isoformat(),
             "entries": {key: entry.to_dict() for key, entry in sorted(self._entries.items())},
         }
-        _atomic_write_text(json.dumps(payload, indent=2), self.path)
+        write_text_atomic(json.dumps(payload, indent=2), self.path)
 
 
 # --------------------------------------------------------------------------- #

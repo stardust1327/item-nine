@@ -9,6 +9,7 @@ python-dotenv>=1.0
 # Modeling
 xgboost>=2.1
 scikit-learn>=1.5
+scipy>=1.11
 
 # App
 streamlit>=1.40

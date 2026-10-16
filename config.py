@@ -222,6 +222,14 @@ class Settings:
     def features_path(self) -> Path:
         return self.processed_dir / "features.parquet"
 
+    @property
+    def predictions_dir(self) -> Path:
+        return self.data_dir / "predictions"
+
+    @property
+    def current_week_json(self) -> Path:
+        return self.predictions_dir / "current_week.json"
+
     def dataset_dir(self, name: str) -> Path:
         return self.raw_dir / name
 
@@ -234,6 +242,7 @@ class Settings:
             self.models_dir,
             self.logs_dir,
             self.odds_dir,
+            self.predictions_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
