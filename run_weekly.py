@@ -25,12 +25,13 @@ Exit codes (shared with ``python -m src.report_generator``):
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -47,6 +48,8 @@ EXIT_OK, EXIT_ERROR, EXIT_MISSING_KEY, EXIT_DEGRADED = R.EXIT_OK, R.EXIT_ERROR, 
 EXIT_INTERRUPTED: Final[int] = 130
 
 PIPELINE_DATASETS: Final[tuple[str, ...]] = ("schedules", "pbp")  # the raw inputs Modules 2-3 read
+RUN_RECORD_VERSION: Final[str] = "1.0.0"
+DEGRADED_NO_LLM: Final[str] = "no game got a Gemini write-up; every report is a template"
 
 # Errors a stage is expected to raise; anything else is logged with a traceback (it is a bug).
 EXPECTED_ERRORS: Final[tuple[type[BaseException], ...]] = (
@@ -98,6 +101,7 @@ class RunResult:
     outputs: list[Path] = field(default_factory=list)
     season: int | None = None
     week: int | None = None
+    is_current: bool | None = None
     error: str | None = None
 
 
@@ -192,7 +196,7 @@ def stage_report(
     if summary["n_template"]:
         logger.warning("%d of %d games fell back to the template report", summary["n_template"], summary["n_games"])
     detail = f"{summary['n_llm']} {contract_c['generator']['model']} / {summary['n_template']} template"
-    degraded = ("no game got a Gemini write-up; every report is a template",) if summary["n_llm"] == 0 else ()
+    degraded = (DEGRADED_NO_LLM,) if summary["n_llm"] == 0 else ()
     return Outcome(detail, contract_c, degraded)
 
 
@@ -224,12 +228,19 @@ def run(
     now: datetime | None = None,
     writer_factory: WriterFactory = default_writer_factory,
 ) -> RunResult:
-    """Run the pipeline. Returns the per-stage record and the exit code; never raises for a stage failure.
+    """Run the pipeline and write the run record. Never raises for a stage failure; see ``RunResult.exit_code``.
 
     ``now`` pins the clock for every stage (tests, replays). By default each stage reads the clock when it
     starts, so live odds are requested only for games that have not kicked off by then.
     """
     clock = _clock(now)
+    started = clock()
+    result = _run(opts, cfg, clock, writer_factory)
+    write_run_record(cfg, opts, result, started, clock())
+    return result
+
+
+def _run(opts: Options, cfg: Settings, clock: Callable[[], datetime], writer_factory: WriterFactory) -> RunResult:
     result = RunResult()
     running = "preflight"
 
@@ -263,7 +274,7 @@ def run(
         running = "model"
         model_now = clock()
         target = resolve_target(cfg, opts, model_now)
-        result.season, result.week = target.season, target.week
+        result.season, result.week, result.is_current = target.season, target.week, target.is_current
         logger.info(
             "Target: %d week %d (%s)", target.season, target.week, "current week" if target.is_current else "replay"
         )
@@ -299,9 +310,50 @@ def _fail(result: RunResult, stage_name: str, code: int, exc: BaseException) -> 
     return result
 
 
+def _rel(path: Path, cfg: Settings) -> str:
+    return str(path.relative_to(cfg.project_root)) if path.is_relative_to(cfg.project_root) else str(path)
+
+
+def run_record(opts: Options, result: RunResult, started: datetime, finished: datetime, cfg: Settings) -> dict:
+    """``data/predictions/last_run.json``: what the last run did, read by the dashboard's banners."""
+    return {
+        "record": "run",
+        "schema_version": RUN_RECORD_VERSION,
+        "started_at": M._iso(started),
+        "finished_at": M._iso(finished),
+        "options": asdict(opts),
+        "season": result.season,
+        "week": result.week,
+        "is_current": result.is_current,
+        "exit_code": result.exit_code,
+        "status": EXIT_MEANINGS.get(result.exit_code, "unknown"),
+        "degraded": list(result.degraded),
+        "error": result.error,
+        "stages": [asdict(s) | {"seconds": round(s.seconds, 2)} for s in result.stages],
+        "outputs": [_rel(p, cfg) for p in result.outputs] if result.exit_code in (EXIT_OK, EXIT_DEGRADED) else [],
+    }
+
+
+def write_run_record(cfg: Settings, opts: Options, result: RunResult, started: datetime, finished: datetime) -> None:
+    record = run_record(opts, result, started, finished, cfg)
+    try:
+        ingest.write_text_atomic(json.dumps(record, indent=2) + "\n", cfg.last_run_json)
+    except OSError as exc:  # the outputs and the exit code matter more than the record
+        logger.warning("Could not write %s: %s", cfg.last_run_json, exc)
+
+
+EXIT_MEANINGS: Final[dict[int, str]] = {
+    EXIT_OK: "ok",
+    EXIT_ERROR: "error",
+    EXIT_MISSING_KEY: "missing API key",
+    EXIT_DEGRADED: "degraded",
+    EXIT_INTERRUPTED: "interrupted",
+}
+
+
 def format_summary(result: RunResult, cfg: Settings = settings) -> str:
     def rel(path: Path) -> str:
-        return str(path.relative_to(cfg.project_root)) if path.is_relative_to(cfg.project_root) else str(path)
+        return _rel(path, cfg)
 
     target = f"{result.season} week {result.week}" if result.season is not None else "no target week"
     lines = [f"Weekly run: {target}"]
@@ -312,14 +364,7 @@ def format_summary(result: RunResult, cfg: Settings = settings) -> str:
     if result.degraded:
         lines.append("DEGRADED:")
         lines += [f"  - {reason}" for reason in result.degraded]
-    meaning = {
-        EXIT_OK: "ok",
-        EXIT_ERROR: "error",
-        EXIT_MISSING_KEY: "missing API key",
-        EXIT_DEGRADED: "degraded",
-        EXIT_INTERRUPTED: "interrupted",
-    }
-    lines.append(f"Exit code {result.exit_code} ({meaning.get(result.exit_code, '?')})")
+    lines.append(f"Exit code {result.exit_code} ({EXIT_MEANINGS.get(result.exit_code, '?')})")
     return "\n".join(lines)
 
 

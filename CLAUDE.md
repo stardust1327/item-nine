@@ -19,8 +19,8 @@ The pipeline is six sequential components. Each writes the input of the next.
 | 2 | Feature engineering | `src/features.py` | **Contract A**: `data/processed/features.parquet` |
 | 3 | Model and live odds pricing | `src/model.py` (the Odds API client and de-vig live in `src/ingest.py`) | **Contract B** |
 | 4 | Report generator | `src/report_generator.py` | **Contract C** and the Markdown newsletter |
-| 5 | Weekly orchestrator | `run_weekly.py` | Runs 1→4 with exit-code propagation, cache controls and degraded-run handling |
-| 6 | Dashboard | `app.py` | Streamlit view of Contracts B and C, archives and backtest metrics |
+| 5 | Weekly orchestrator | `run_weekly.py` | Runs 1→4 in order, stops on a failed stage; **run record** `last_run.json` |
+| 6 | Dashboard | `app.py` | Streamlit view of Contracts B and C for any archived week, with degraded/template banners |
 
 ## 2. Directory structure
 
@@ -33,6 +33,7 @@ item-nine/
 ├── config.py                             # Settings: paths, seasons, cache policy, API/LLM settings, tier thresholds
 ├── run_weekly.py                         # Module 5
 ├── app.py                                # Module 6
+├── .streamlit/config.toml                # dashboard chrome (viewer toolbar, no usage stats)
 ├── src/
 │   ├── __init__.py
 │   ├── ingest.py                         # Module 1 (+ Odds API client, de-vig, snapshot writer)
@@ -51,12 +52,14 @@ item-nine/
 │       ├── week_XX_YYYY_preds.json       # Contract B (versioned archive)
 │       ├── weekly_report_enriched.json   # Contract C (latest run)
 │       ├── week_XX_YYYY_enriched.json    # Contract C (versioned archive)
+│       ├── last_run.json                 # run record of the last run_weekly.py run
 │       ├── backtest_report.json          # walk-forward metrics
 │       └── backtest_predictions.parquet  # out-of-sample predictions
 ├── reports/
 │   └── week_XX_YYYY.md                   # Markdown newsletter, e.g. week_06_2026.md (generated, git-ignored)
 └── tests/
     ├── conftest.py                       # shared synthetic league
+    ├── fakes.py                          # shared test doubles (fake Gemini writer, nflverse-style schedules)
     ├── test_ingest.py                    # Module 1
     ├── test_leakage.py                   # Module 2 leakage, probability bounds, project-wide guards
     ├── test_model.py                     # Module 3
@@ -124,7 +127,7 @@ Each invariant has tests; breaking one is a blocking defect.
     The model's disagreement *against* the pick never upgrades the pick's tier; `value_team` names the side the model
     prefers. Tiers are derived from the published, rounded values, so anyone can recompute them from the JSON.
 
-## 5. Data contracts
+## 5. Data contracts and pipeline behavior
 
 ### Contract A — `data/processed/features.parquet`
 
@@ -206,6 +209,55 @@ The newsletter contains:
 
 Displayed numbers are truncated, so they never round across a tier threshold.
 
+### Module 5 — `run_weekly.py`
+
+- **Stages:** preflight (Gemini key) → ingest (`schedules`, `pbp` only) → features → optional backtest → model → report.
+  Each stage reads what the previous one wrote. A failed stage stops the run; a degraded stage does not.
+- **Target week:** `model.resolve_week`. The default is the current week: the earliest week of the season in progress
+  (by the run's clock) with a game yet to kick off. `--week` may name a past week (a replay); a later week is an error.
+- **Latest-run files** (`current_week.json`, `weekly_report_enriched.json`) are written only for the current week. Every
+  run writes the week's archives and newsletter, so a replay never replaces the latest predictions.
+- **Live odds** are requested only for the current week and only without `--use-cached-odds`, at most one pull (2
+  credits) per run. Each stage reads the clock when it starts, so games that kicked off during earlier stages get no
+  live price.
+- **Degraded** (exit 3): an nflverse refresh failed and an older cached copy was used; live odds were requested but no
+  upcoming game got an `odds_api` line; or the LLM ran and no game got a write-up (`DEGRADED_NO_LLM`).
+
+### Run record — `data/predictions/last_run.json` (schema `1.0.0`)
+
+Written by `run_weekly.py` after every run, including failed ones. A failure to write it is logged and never changes
+the exit code.
+
+| Field | Type / meaning |
+|---|---|
+| `record`, `schema_version` | `"run"`, `"1.0.0"` |
+| `started_at`, `finished_at` | ISO-8601 UTC |
+| `options` | The CLI options (`season`, `week`, `use_cached_odds`, `skip_llm`, `skip_ingest`, `backtest`) |
+| `season`, `week`, `is_current` | The target week, or null if the run failed before choosing one |
+| `exit_code`, `status` | 0/1/2/3 and `ok`, `error`, `missing API key` or `degraded` |
+| `degraded[]` | Why the run is degraded (empty unless exit code 3) |
+| `error` | `"<stage>: <ErrorType>: <message>"`, or null |
+| `stages[]` | {`name`, `status` (`ok`, `degraded`, `skipped`, `failed`), `seconds`, `detail`} |
+| `outputs[]` | Repository-relative paths written (empty unless exit code 0 or 3) |
+
+### Module 6 — `app.py`
+
+- **Read-only.** The dashboard reads only `data/predictions/` and `reports/`. It never calls an API, retrains, or
+  writes. `Settings.from_env()` is read on every rerun.
+- **Weeks.** Weeks come from the archives. A latest-run file fills in a week that has no archive. The default week is
+  that of `current_week.json`.
+- **Validation.** Contract B and C are validated on load. A file that fails is reported in an error banner and never
+  displayed. A valid Contract C stands in for an invalid Contract B.
+- **Banners**, in this order:
+  - **Errors:** unreadable files; a failed last run (exit 1/2); a degraded run. The run record's reasons apply only
+    when the record is the run that produced the shown predictions: same week, and `started_at ≤ generated_at ≤
+    finished_at`. An all-template LLM report is also degraded.
+  - **Warnings:** no report yet; write-ups older than the predictions; template mode; partial template fallback.
+  - **Info:** games without a market line.
+- **Display.** The chart and table show pick-side probabilities, truncated like the newsletter. Chart colors are
+  categorical slots 1–2 of the dataviz reference palette, validated in light and dark mode. Every value in the chart is
+  also in the table.
+
 ## 6. LLM rules (Module 4)
 
 - The LLM sees only the per-game fact sheet built by `game_facts`. It is never given raw logits or numbers the
@@ -241,7 +293,7 @@ All settings live in `config.Settings`, populated from the environment or `.env`
 | `NFL_START_SEASON` | `2016` | First cached season |
 | `ODDS_BOOKMAKERS` | 8 major US books | Books used for the consensus (≤ 10 books counts as 1 region of credits) |
 | `LLM_MAX_ATTEMPTS`, `LLM_TEMPERATURE`, `LLM_MAX_CONCURRENCY`, `GEMINI_THINKING_BUDGET` | 3, 0.4, 4, model default | Generation controls |
-| `NFL_DATA_DIR`, `NFL_MODELS_DIR`, `NFL_LOGS_DIR` | Under the repo | Path overrides |
+| `NFL_DATA_DIR`, `NFL_REPORTS_DIR`, `NFL_MODELS_DIR`, `NFL_LOGS_DIR` | Under the repo | Path overrides (the dashboard reads them on every rerun) |
 
 ## 8. Commands and exit codes
 
@@ -251,17 +303,18 @@ All settings live in `config.Settings`, populated from the environment or `.env`
 | `python -m src.features` | Build Contract A |
 | `python -m src.model [backtest\|predict\|all] [--no-odds]` | Walk-forward backtest and/or Contract B. `--no-odds` uses a snapshot or nflverse lines instead of a live pull. |
 | `python -m src.report_generator [--template] [--strict]` | Contract C and the newsletter |
-| `python run_weekly.py [--season S --week W] [--use-cached-odds] [--skip-llm]` | The full weekly pipeline |
-| `streamlit run app.py` | The dashboard |
+| `python run_weekly.py [--season S] [--week W] [--use-cached-odds] [--skip-llm] [--skip-ingest] [--backtest]` | The full weekly pipeline (Section 5, Module 5) |
+| `streamlit run app.py` | The dashboard (read-only) |
 
 The report generator and orchestrator share these exit codes:
 
-| Code | Meaning |
-|---|---|
-| 0 | OK |
-| 1 | Error. Nothing downstream ran; the failing stage wrote nothing. |
-| 2 | Missing Gemini API key |
-| 3 | Degraded: outputs written, but no game got an LLM write-up |
+| Code | Report generator | Orchestrator |
+|---|---|---|
+| 0 | OK | OK |
+| 1 | Error; nothing written | A stage failed; later stages did not run |
+| 2 | Missing Gemini API key | Missing API key: `GEMINI_API_KEY` (unless `--skip-llm`), checked before any stage; `ODDS_API_KEY` for the current week (unless `--use-cached-odds`), checked before predicting |
+| 3 | Written, but no game got an LLM write-up | Written, but degraded (Section 5, run record) |
+| 130 | — | Interrupted |
 
 ## 9. Testing and review rules
 

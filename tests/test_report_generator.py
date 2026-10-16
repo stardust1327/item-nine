@@ -571,11 +571,11 @@ def test_display_values_never_cross_tier_thresholds():  # C2
 
 def test_writer_label_reflects_actual_generation(payload, cfg):  # C5
     all_failed = R.enrich_payload(payload, ScriptedWriter(R.LLMRequestError("HTTP 503")), cfg=cfg, now=NOW)
-    assert R._writer_label(all_failed) == "rule-based templates (Gemini unavailable)"
+    assert R.writer_label(all_failed) == "rule-based templates (Gemini unavailable)"
     assert "write-ups: rule-based templates (Gemini unavailable)" in R.render_newsletter(all_failed)
     mixed = copy.deepcopy(all_failed)
     mixed["summary"].update(n_llm=5, n_template=len(payload["games"]) - 5)
-    assert R._writer_label(mixed).startswith("fake-gemini for 5 of")
+    assert R.writer_label(mixed).startswith("fake-gemini for 5 of")
 
 
 def test_run_wide_errors_abort_without_writing(payload, cfg):  # runtime F1
@@ -656,7 +656,7 @@ def test_playoff_titles_and_track_record_follow_the_data(payload, cfg):  # contr
             "final": {"brier": 0.205, "n_games": 9},
         },
     }
-    assert "The model has been the most accurate" in R._track_record(model_wins, 0.3)
+    assert "The model has been the most accurate" in R.track_record(model_wins, 0.3)
 
 
 def test_main_exit_codes(payload, cfg, monkeypatch):  # degraded runs are visible to orchestration

@@ -4,7 +4,7 @@ NFL Game Prediction Engine and Weekly Scouting Report web app (Python 3.11+).
 
 ## Project layout
 
-The layout follows CLAUDE.md §3. Implemented so far: `config.py`, `src/ingest.py`, `src/features.py`, `src/model.py`, `src/report_generator.py` and their tests. `run_weekly.py` and `app.py` are planned.
+CLAUDE.md is the authoritative spec (invariants, Contracts A/B/C, the run record, configuration and exit codes). Every module in the layout below is implemented and tested.
 
 ```
 item-nine/
@@ -13,20 +13,21 @@ item-nine/
 ├── requirements.txt
 ├── pyproject.toml             # pytest + ruff config
 ├── .env.example               # ODDS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY + optional overrides
-├── run_weekly.py              # (planned) end-to-end CLI orchestrator
-├── app.py                     # (planned) Streamlit dashboard
+├── run_weekly.py              # weekly orchestrator: ingest -> features -> model -> report
+├── app.py                     # Streamlit dashboard (read-only)
 ├── data/                      # git-ignored
 │   ├── raw/                   # pbp/, schedules/, rosters_weekly/, injuries/, odds/, _manifest.json
 │   ├── processed/             # features.parquet
 │   └── predictions/           # current_week.json (Contract B), weekly_report_enriched.json (Contract C),
-│                              # week_XX_YYYY_preds.json / week_XX_YYYY_enriched.json archives, backtests
+│                              # week_XX_YYYY_preds.json / week_XX_YYYY_enriched.json archives,
+│                              # last_run.json (run record), backtests
 ├── reports/                   # weekly Markdown newsletters (week_XX_YYYY.md)
 ├── src/
 │   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache, de-vig)
 │   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
 │   ├── model.py               # walk-forward XGBoost + sigmoid calibration + market blend -> Contract B
 │   └── report_generator.py    # Gemini scouting reports + Pydantic validation -> Contract C + newsletter
-└── tests/                     # test_leakage.py (leakage + probability bounds), test_ingest.py, test_model.py, ...
+└── tests/                     # test_leakage.py (leakage + probability bounds), one test file per module
 ```
 
 ## Quickstart
@@ -34,15 +35,16 @@ item-nine/
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env               # add ODDS_API_KEY
+cp .env.example .env               # add ODDS_API_KEY and GEMINI_API_KEY (or use the no-API flags below)
 
-python -m src.ingest               # first run downloads 2016-current (~30s, ~135 MB)
-python -m src.ingest               # later runs only refresh what is stale
-python -m src.ingest --odds        # also pull current-week consensus market odds
-python -m src.features             # build data/processed/features.parquet (<1s)
-python -m src.model                # walk-forward backtest + data/predictions/current_week.json (~10s)
+python run_weekly.py --backtest    # first run: downloads 2016-current (~30s, ~135 MB), backtest, week predictions
+python run_weekly.py               # each week: refresh stale data, live odds (2 credits), Gemini write-ups
+python run_weekly.py --use-cached-odds --skip-llm   # no API calls at all
+streamlit run app.py               # dashboard at http://localhost:8501
 python -m pytest
 ```
+
+Each module also has its own CLI: `python -m src.ingest [--odds]`, `python -m src.features`, `python -m src.model [backtest|predict]` and `python -m src.report_generator [--template]`.
 
 From Python:
 
@@ -106,3 +108,48 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
 - **Unknowns stay null.** nflverse fills in wind only after kickoff, and retractable-roof status isn't known before game day. Upcoming games keep those flags null unless you pass a wind forecast through `build_game_features(..., weather=...)`.
 
 `tests/test_leakage.py` changes a game's own play-by-play and final score and asserts its features don't move. It also rebuilds every game from data cut off at that game's kickoff and asserts the result matches the full build.
+
+## Weekly run
+
+`python run_weekly.py` runs Modules 1-4 in order:
+1. **Ingest:** refresh the stale nflverse schedules and play-by-play.
+2. **Features:** rebuild the feature matrix.
+3. **Model:** predict the week, with live odds for the current week.
+4. **Report:** write the scouting reports and the newsletter.
+
+If a stage fails, the run stops and later stages don't run. It then prints a stage-by-stage summary and writes `data/predictions/last_run.json`.
+
+| Flag | Effect |
+|---|---|
+| `--use-cached-odds` | No Odds API call. Uses the latest saved snapshot from or before the prediction time, then nflverse lines. |
+| `--skip-llm` | Deterministic template write-ups; no Gemini key needed. |
+| `--season S --week W` | Replay a past week. Only that week's archives and newsletter are written; `current_week.json` is left alone. Weeks after the current one are rejected. |
+| `--skip-ingest` | Use the cached nflverse data as-is (offline). |
+| `--backtest` | Also re-run the walk-forward backtest, which feeds the track record. |
+
+**Exit codes:**
+- 0 ok
+- 1 a stage failed
+- 2 a missing API key. Gemini is checked before any work. The Odds API key is checked before predicting the current week.
+- 3 degraded. Outputs are written, but one of these happened:
+  - no game got a Gemini write-up
+  - live odds were requested but no upcoming game got one
+  - an nflverse refresh failed and an older cached copy was used
+- 130 interrupted
+
+## Dashboard
+
+`streamlit run app.py` reads the files the pipeline wrote and nothing else. It makes no API calls and doesn't retrain.
+
+- **Week picker:** the sidebar lists every archived week, newest first. It opens on the latest run's week.
+- **Banners**, at the top under the title:
+  - Errors: unreadable files, a failed last run, a degraded run.
+  - Warnings: no report yet, write-ups older than the predictions, template mode, Gemini fallbacks.
+  - Info: games without a market line.
+- **Metadata row:** prediction time, odds source with its snapshot time, market weight, and who wrote the write-ups.
+- **Chart:** model vs market, as a dot plot of each pick's win probability. Market and model are dots and the blend is a diamond.
+- **Table:** the same values per game, with edge, tier and result.
+- **Scouting reports:** one card per game with a tier badge and the four write-up fields. The cards can be filtered by tier.
+- **Model, tiers and track record:** an expander with the tier rules, the walk-forward track record and a newsletter download.
+
+`NFL_DATA_DIR` and `NFL_REPORTS_DIR` point it at other directories.

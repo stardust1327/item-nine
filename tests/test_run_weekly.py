@@ -276,7 +276,7 @@ def test_future_week_is_rejected_without_writing(cfg, league):
     assert result.exit_code == W.EXIT_ERROR
     assert result.stages[-1].name == "model" and result.stages[-1].status == "failed"
     assert "week 8 is in the future; the current week is 6" in result.error
-    assert not list(cfg.predictions_dir.glob("*.json"))
+    assert sorted(p.name for p in cfg.predictions_dir.glob("*.json")) == ["last_run.json"]
 
 
 def test_skip_ingest_does_not_sync(cfg, league):
@@ -314,6 +314,47 @@ def test_ingest_syncs_only_the_datasets_the_pipeline_reads(cfg, monkeypatch):
     outcome = W.stage_ingest(cfg)
     assert seen == [("schedules", "pbp")]
     assert outcome.detail == "schedules + pbp 2016-2026" and outcome.degraded == ()
+
+
+def test_run_record_describes_a_degraded_run(odds_cfg, league, monkeypatch):
+    empty = pl.DataFrame(schema=ingest.CONSENSUS_SCHEMA)  # what a live pull that finds no prices returns
+    monkeypatch.setattr(ingest, "fetch_market_win_probs", lambda **_: empty)
+    result = W.run(W.Options(skip_llm=True), odds_cfg, now=NOW, writer_factory=_template_only)
+    record = _read(odds_cfg.last_run_json)
+
+    assert result.exit_code == record["exit_code"] == W.EXIT_DEGRADED
+    assert record["status"] == "degraded" and record["degraded"] == result.degraded
+    assert (record["season"], record["week"], record["is_current"]) == (2026, 6, True)
+    assert record["started_at"] == record["finished_at"] == "2026-10-16T18:00:00Z"
+    assert record["options"] == dataclasses.asdict(W.Options(skip_llm=True))
+    assert [s["name"] for s in record["stages"]] == list(STAGES)
+    assert "data/predictions/current_week.json" in record["outputs"]
+    assert record["error"] is None
+
+
+def test_run_record_describes_a_failed_run(cfg, league):
+    result = W.run(W.Options(week=7, use_cached_odds=True, skip_llm=True), cfg, now=NOW, writer_factory=_template_only)
+    record = _read(cfg.last_run_json)
+    assert record["exit_code"] == result.exit_code == W.EXIT_ERROR
+    assert record["status"] == "error" and record["outputs"] == []
+    assert record["error"].startswith("model: ModelError: 2026 week 7 is in the future")
+    assert record["season"] is None and record["stages"][-1]["status"] == "failed"
+
+    W.run(W.Options(use_cached_odds=True), cfg, now=NOW)  # no Gemini key
+    assert _read(cfg.last_run_json)["status"] == "missing API key"
+
+
+def test_an_unwritable_run_record_keeps_the_exit_code(cfg, league, monkeypatch):
+    real_write = ingest.write_text_atomic
+
+    def write(text: str, path: Path) -> None:
+        if path.name == "last_run.json":
+            raise PermissionError("read-only")
+        real_write(text, path)
+
+    monkeypatch.setattr(ingest, "write_text_atomic", write)
+    result = W.run(W.Options(use_cached_odds=True, skip_llm=True), cfg, now=NOW, writer_factory=_template_only)
+    assert result.exit_code == W.EXIT_OK and not cfg.last_run_json.exists()
 
 
 # --------------------------------------------------------------------------- #

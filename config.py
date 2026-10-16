@@ -178,6 +178,7 @@ class Settings:
     processed_dir: Path
     models_dir: Path
     logs_dir: Path
+    reports_dir: Path  # weekly Markdown newsletters
 
     # Seasons
     start_season: int
@@ -248,6 +249,11 @@ class Settings:
     def enriched_report_json(self) -> Path:
         return self.predictions_dir / "weekly_report_enriched.json"
 
+    @property
+    def last_run_json(self) -> Path:
+        """Run record of the last ``run_weekly.py`` run (stages, exit code, degraded reasons)."""
+        return self.predictions_dir / "last_run.json"
+
     def preds_archive_json(self, season: int, week: int) -> Path:
         """Versioned Contract B for one week: data/predictions/week_XX_YYYY_preds.json."""
         return self.predictions_dir / f"week_{week:02d}_{season}_preds.json"
@@ -259,10 +265,6 @@ class Settings:
     def newsletter_md(self, season: int, week: int) -> Path:
         """Weekly newsletter: reports/week_XX_YYYY.md (season in the name, so seasons never overwrite each other)."""
         return self.reports_dir / f"week_{week:02d}_{season}.md"
-
-    @property
-    def reports_dir(self) -> Path:
-        return self.project_root / "reports"
 
     def dataset_dir(self, name: str) -> Path:
         return self.raw_dir / name
@@ -317,6 +319,7 @@ class Settings:
             processed_dir=data_dir / "processed",
             models_dir=_env_path("NFL_MODELS_DIR", root / "models"),
             logs_dir=_env_path("NFL_LOGS_DIR", root / "logs"),
+            reports_dir=_env_path("NFL_REPORTS_DIR", root / "reports"),
             start_season=start_season,
             nflverse_timeout_s=_env_int("NFLVERSE_TIMEOUT_S", 120),
             nflverse_max_retries=max(1, _env_int("NFLVERSE_MAX_RETRIES", 3)),

@@ -1124,7 +1124,7 @@ def md_text(text: str) -> str:
     return re.sub(r"^(\s*\d+)([.)])", r"\1\\\2", escaped)
 
 
-def _local_kickoff(iso: str) -> str:
+def local_kickoff(iso: str) -> str:
     kickoff = M._parse_iso(iso)
     if kickoff is None:
         return iso
@@ -1137,16 +1137,16 @@ def _local_kickoff(iso: str) -> str:
     return local.strftime("%a %b %d, %I:%M %p ET").replace(" 0", " ")
 
 
-def _pct_text(p: float) -> str:
+def pct_text(p: float) -> str:
     return f"{pct_down(p):.1f}%"
 
 
-def _edge_text(game: dict[str, Any]) -> str:
+def edge_text(game: dict[str, Any]) -> str:
     edge = game["model_edge_pct"]
     return "n/a" if edge is None else f"{edge_down(edge):+.1f} pts"
 
 
-def _result_text(game: dict[str, Any]) -> str:
+def result_text(game: dict[str, Any]) -> str:
     if game["status"] != "final" or not game["result"]:
         return "in progress" if game["status"] == "in_progress" else "—"
     home, away = game["result"]["home_score"], game["result"]["away_score"]
@@ -1161,14 +1161,18 @@ def _md_cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
-def _title(contract_c: dict[str, Any]) -> str:
-    types = {g["game_type"] for g in contract_c["games"]}
+def week_label(payload: dict[str, Any]) -> str:
+    """The week as a reader says it: "Week 6", or the playoff round ("Wild Card Round") if all games share one."""
+    types = {g["game_type"] for g in payload["games"]}
     label = _ROUND_NAMES[next(iter(types))] if len(types) == 1 and next(iter(types)) in _ROUND_NAMES else None
-    week = label or f"Week {contract_c['week']}"
-    return f"# NFL {week} Scouting Report — {contract_c['season']} Season"
+    return label or f"Week {payload['week']}"
 
 
-def _writer_label(contract_c: dict[str, Any]) -> str:
+def _title(contract_c: dict[str, Any]) -> str:
+    return f"# NFL {week_label(contract_c)} Scouting Report — {contract_c['season']} Season"
+
+
+def writer_label(contract_c: dict[str, Any]) -> str:
     gen, summary = contract_c["generator"], contract_c["summary"]
     if gen["mode"] == "template" or summary["n_llm"] == 0:
         return "rule-based templates" + (" (Gemini unavailable)" if gen["mode"] == "llm" else "")
@@ -1177,7 +1181,7 @@ def _writer_label(contract_c: dict[str, Any]) -> str:
     return gen["model"]
 
 
-def _track_record(backtest_report: dict[str, Any] | None, market_weight: float) -> str | None:
+def track_record(backtest_report: dict[str, Any] | None, market_weight: float) -> str | None:
     if not backtest_report or not isinstance(backtest_report.get("pooled"), dict):
         return None
     pooled = backtest_report["pooled"]
@@ -1207,7 +1211,7 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
         "",
         f"_Generated {generated:%b %d, %Y %H:%M} UTC from predictions made {as_of:%b %d, %Y %H:%M} UTC · win "
         f"probabilities: calibrated XGBoost blended with the de-vigged market ({model['market_weight']:.0%} market "
-        f"weight) · write-ups: {_writer_label(contract_c)}_",
+        f"weight) · write-ups: {writer_label(contract_c)}_",
         "",
         "## At a glance",
         "",
@@ -1216,9 +1220,9 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
     ]
     for g in games:
         lines.append(
-            f"| {g['away_team']} @ {g['home_team']} | {_md_cell(_local_kickoff(g['kickoff_utc']))} "
-            f"| {g['pick']['team']} | {_pct_text(g['pick']['win_prob'])} | {g['confidence_tier']} | {_edge_text(g)} "
-            f"| {_result_text(g)} |"
+            f"| {g['away_team']} @ {g['home_team']} | {_md_cell(local_kickoff(g['kickoff_utc']))} "
+            f"| {g['pick']['team']} | {pct_text(g['pick']['win_prob'])} | {g['confidence_tier']} | {edge_text(g)} "
+            f"| {result_text(g)} |"
         )
 
     upcoming = [g for g in games if g["status"] != "final"]
@@ -1241,7 +1245,7 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
         "- **Model vs market** is the model's win probability for the pick minus the de-vigged market's, in "
         "percentage points. The final number blends the two."
     )
-    record = _track_record(backtest_report, model["market_weight"])
+    record = track_record(backtest_report, model["market_weight"])
     if record:
         lines.append(record)
     lines += [
@@ -1257,17 +1261,16 @@ def _game_section(g: dict[str, Any]) -> list[str]:
     side = g["pick"]["side"]
     market = g["market"]
     market_text = (
-        f"{g['pick']['team']} {_pct_text(market[f'{side}_wp'])} "
-        f"({_SOURCE_TEXT.get(market['source'], market['source'])})"
+        f"{g['pick']['team']} {pct_text(market[f'{side}_wp'])} ({_SOURCE_TEXT.get(market['source'], market['source'])})"
         if market
         else "no line"
     )
     lines = [
         f"### {g['away_team']} @ {g['home_team']} — {md_text(report['headline'])}",
         "",
-        f"**Pick:** {g['pick']['team']} {_pct_text(g['pick']['win_prob'])} · **Tier:** {g['confidence_tier']} · "
-        f"**Model:** {g['pick']['team']} {_pct_text(g['model'][f'{side}_wp'])} · **Market:** {market_text} · "
-        f"**Kickoff:** {_local_kickoff(g['kickoff_utc'])}",
+        f"**Pick:** {g['pick']['team']} {pct_text(g['pick']['win_prob'])} · **Tier:** {g['confidence_tier']} · "
+        f"**Model:** {g['pick']['team']} {pct_text(g['model'][f'{side}_wp'])} · **Market:** {market_text} · "
+        f"**Kickoff:** {local_kickoff(g['kickoff_utc'])}",
         "",
         md_text(report["the_pick_summary"]),
         "",
