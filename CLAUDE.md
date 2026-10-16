@@ -34,13 +34,14 @@ item-nine/
 ├── run_weekly.py                         # Module 5
 ├── app.py                                # Module 6
 ├── .streamlit/config.toml                # dashboard chrome (viewer toolbar, no usage stats)
+├── .github/workflows/ci_and_weekly.yml   # CI (ruff + pytest) and the scheduled weekly run (Section 9)
 ├── src/
 │   ├── __init__.py
 │   ├── ingest.py                         # Module 1 (+ Odds API client, de-vig, snapshot writer)
 │   ├── features.py                       # Module 2
 │   ├── model.py                          # Module 3
 │   └── report_generator.py               # Module 4
-├── data/                                 # git-ignored
+├── data/                                 # git-ignored, except data/predictions/*.json (committed by the weekly job)
 │   ├── raw/
 │   │   ├── _manifest.json                # fetch time and finality of every cached file
 │   │   ├── pbp/ schedules/ rosters_weekly/ injuries/
@@ -56,7 +57,7 @@ item-nine/
 │       ├── backtest_report.json          # walk-forward metrics
 │       └── backtest_predictions.parquet  # out-of-sample predictions
 ├── reports/
-│   └── week_XX_YYYY.md                   # Markdown newsletter, e.g. week_06_2026.md (generated, git-ignored)
+│   └── week_XX_YYYY.md                   # Markdown newsletter, e.g. week_06_2026.md (committed by the weekly job)
 └── tests/
     ├── conftest.py                       # shared synthetic league
     ├── fakes.py                          # shared test doubles (fake Gemini writer, nflverse-style schedules)
@@ -328,3 +329,10 @@ The report generator and orchestrator share these exit codes:
   cache skip when it is absent.
 - Routine runs use cached odds (`--use-cached-odds` / `--no-odds`). The Odds API bills credits per call.
 - Contract changes bump `schema_version`, update the validator and this file together, and add validator mutation tests.
+- **CI** (`.github/workflows/ci_and_weekly.yml`, job `test`) runs `ruff check`, `ruff format --check` and `pytest` on
+  every push to `main` and every pull request.
+- **Weekly job** (`weekly_report`) runs `python run_weekly.py --backtest` on Tuesdays 13:00 UTC and Fridays 21:00 UTC,
+  or on demand (`workflow_dispatch`, with optional `season`, `week`, `use_cached_odds` and `skip_llm` inputs). It uses
+  the `ODDS_API_KEY` and `GEMINI_API_KEY` repository secrets and caches `data/raw` between runs. It commits
+  `data/predictions/*.json` and `reports/*.md`, and also commits `last_run.json` after a failed run so the dashboard
+  can show it. Exit 3 is a job warning; exit 1 or 2 fails the job.

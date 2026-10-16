@@ -153,3 +153,22 @@ If a stage fails, the run stops and later stages don't run. It then prints a sta
 - **Model, tiers and track record:** an expander with the tier rules, the walk-forward track record and a newsletter download.
 
 `NFL_DATA_DIR` and `NFL_REPORTS_DIR` point it at other directories.
+
+## Automation and iPad use
+
+`.github/workflows/ci_and_weekly.yml` has two jobs:
+- **`test`** runs ruff and pytest on every push to `main` and on every pull request.
+- **`weekly_report`** runs `python run_weekly.py --backtest` on Tuesdays at 13:00 UTC and Fridays at 21:00 UTC. It commits the new `data/predictions/*.json` and `reports/*.md` back to `main`.
+
+Setup, all of which can be done from the GitHub app or a browser on an iPad:
+1. **Secrets:** add `ODDS_API_KEY` and `GEMINI_API_KEY` under **Settings → Secrets and variables → Actions**.
+2. **Manual runs:** go to **Actions → CI and weekly report → Run workflow**. All inputs are optional:
+   - `season` and `week`
+   - `use_cached_odds` (no Odds API credits)
+   - `skip_llm` (template write-ups)
+3. **Dashboard:** on [Streamlit Community Cloud](https://share.streamlit.io), create an app from this repository with branch `main` and main file `app.py`. Each weekly commit redeploys it, so the iPad always shows the latest report. The app only reads the committed JSON files.
+4. **Pushes:** the weekly job pushes with the built-in `GITHUB_TOKEN`. If `main` is protected, allow GitHub Actions to push to it, or the commit step fails.
+
+**Outcomes:**
+- A degraded run (exit 3) shows as a warning on the job.
+- A failed run (exit 1 or 2) fails the job, but still commits `last_run.json`, so the dashboard shows the failure.
