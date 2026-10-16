@@ -4,34 +4,28 @@ NFL Game Prediction Engine and Weekly Scouting Report web app (Python 3.11+).
 
 ## Project layout
 
-Implemented so far: `config.py`, `src/ingest.py`, `src/features.py`, `src/model.py` and their tests. Everything else in the tree below is the planned layout.
+The layout follows CLAUDE.md §3. Implemented so far: `config.py`, `src/ingest.py`, `src/features.py`, `src/model.py`, `src/report_generator.py` and their tests. `run_weekly.py` and `app.py` are planned.
 
 ```
 item-nine/
-├── config.py                  # all settings: paths, seasons, cache policy, Odds API, logging
+├── CLAUDE.md                  # project rules (sections 1-3 checked in so far)
+├── config.py                  # all settings: paths, seasons, cache policy, API keys, logging
 ├── requirements.txt
 ├── pyproject.toml             # pytest + ruff config
-├── .env.example               # ODDS_API_KEY and optional overrides
-├── src/
-│   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache)
-│   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
-│   ├── model.py               # walk-forward XGBoost + sigmoid calibration + market blend -> current_week.json
-│   ├── market/
-│   │   └── edges.py           # model vs. market_home_wp, fractional Kelly sizing
-│   └── reports/
-│       └── scouting.py        # weekly matchup report payloads
-├── app/
-│   ├── streamlit_app.py       # `streamlit run app/streamlit_app.py`
-│   └── pages/                 # Weekly Picks, Scouting Report, Model Diagnostics, Data Health
+├── .env.example               # ODDS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY + optional overrides
+├── run_weekly.py              # (planned) end-to-end CLI orchestrator
+├── app.py                     # (planned) Streamlit dashboard
 ├── data/                      # git-ignored
 │   ├── raw/                   # pbp/, schedules/, rosters_weekly/, injuries/, odds/, _manifest.json
-│   ├── interim/
-│   ├── processed/             # feature matrices
-│   └── predictions/           # current_week.json (Contract B), backtest report + predictions
-├── models/                    # trained artifacts (git-ignored)
-├── logs/
-├── notebooks/
-└── tests/
+│   ├── processed/             # features.parquet
+│   └── predictions/           # current_week.json (Contract B), weekly_report_enriched.json (Contract C), backtests
+├── reports/                   # weekly Markdown newsletters
+├── src/
+│   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache, de-vig)
+│   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
+│   ├── model.py               # walk-forward XGBoost + sigmoid calibration + market blend -> Contract B
+│   └── report_generator.py    # Gemini scouting reports + Pydantic validation -> Contract C + newsletter
+└── tests/                     # test_leakage.py (leakage + probability bounds), test_ingest.py, test_model.py, ...
 ```
 
 ## Quickstart

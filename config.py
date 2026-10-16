@@ -207,6 +207,15 @@ class Settings:
     # turn a spread into a win probability when a game has no moneyline.
     spread_margin_sigma: float
 
+    # LLM scouting reports (google-genai)
+    gemini_api_key: str | None = field(repr=False)
+    gemini_model: str
+    llm_temperature: float
+    llm_max_attempts: int  # per game, including repair attempts after a validation failure
+    llm_timeout_s: float
+    llm_max_concurrency: int
+    llm_thinking_budget: int | None  # None = model default; 0 disables thinking on 2.5 Flash
+
     # Logging
     log_level: str
 
@@ -230,6 +239,14 @@ class Settings:
     def current_week_json(self) -> Path:
         return self.predictions_dir / "current_week.json"
 
+    @property
+    def enriched_report_json(self) -> Path:
+        return self.predictions_dir / "weekly_report_enriched.json"
+
+    @property
+    def reports_dir(self) -> Path:
+        return self.project_root / "reports"
+
     def dataset_dir(self, name: str) -> Path:
         return self.raw_dir / name
 
@@ -243,6 +260,7 @@ class Settings:
             self.logs_dir,
             self.odds_dir,
             self.predictions_dir,
+            self.reports_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -295,6 +313,13 @@ class Settings:
             odds_quota_warn_threshold=_env_int("ODDS_QUOTA_WARN_THRESHOLD", 50),
             odds_consensus_method=method,  # type: ignore[arg-type]
             spread_margin_sigma=_env_float("NFL_SPREAD_MARGIN_SIGMA", 13.45),
+            gemini_api_key=_env_str("GEMINI_API_KEY") or _env_str("GOOGLE_API_KEY"),
+            gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash",
+            llm_temperature=_env_float("LLM_TEMPERATURE", 0.4),
+            llm_max_attempts=max(1, _env_int("LLM_MAX_ATTEMPTS", 3)),
+            llm_timeout_s=_env_float("LLM_TIMEOUT_S", 60.0),
+            llm_max_concurrency=max(1, _env_int("LLM_MAX_CONCURRENCY", 4)),
+            llm_thinking_budget=_env_int("GEMINI_THINKING_BUDGET", -1) if _env_str("GEMINI_THINKING_BUDGET") else None,
             log_level=(_env_str("LOG_LEVEL", "INFO") or "INFO").upper(),
         )
 
@@ -340,6 +365,6 @@ def setup_logging(level: str | int | None = None, *, log_to_file: bool = True, c
         except OSError as exc:  # read-only filesystem, permissions, ...
             root.warning("File logging disabled (%s); logging to console only.", exc)
 
-    for noisy in ("urllib3", "requests"):
+    for noisy in ("urllib3", "requests", "httpx", "httpcore", "google_genai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     _logging_configured = True
