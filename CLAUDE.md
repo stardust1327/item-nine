@@ -115,17 +115,19 @@ Each invariant has tests; breaking one is a blocking defect.
       saved **at or before** prediction time, then nflverse lines.
     - A line is `nflverse_close` only if it was observed after kickoff. Otherwise it is `nflverse_line`, stamped with its
       fetch time.
-11. **Confidence tiers.** These are directional and use configurable thresholds (Section 7); the first match wins.
+11. **Confidence tiers.** These use configurable thresholds (Section 7). For each game the first match wins; then the STAT MISMATCH cap is applied to the week.
 
     | Tier | Rule (defaults) |
     |---|---|
     | `LOCK` | The pick's final win probability is ≥ `lock_min_win_prob` (0.75), **and** the model also favors the pick. |
-    | `VALUE EDGE` | The model rates the **pick** ≥ `value_edge_min_pct` (8.0) percentage points above the market. |
+    | `STAT MISMATCH` | The model and the market differ by ≥ `mismatch_min_pct` (8.0) percentage points on the pick, **in either direction**: \|`model_edge_pct`\| ≥ 8.0, i.e. 0.08 in probability. **Capped** at `mismatch_max_per_week` (2) games per week, largest \|gap\| first, ties to the earlier kickoff, then the lower `game_id`. Games over the cap fall through to `LEAN` or `COIN FLIP`. |
     | `LEAN` | The pick's final win probability is ≥ `lean_min_win_prob` (0.55). |
     | `COIN FLIP` | Everything else. |
 
-    The model's disagreement *against* the pick never upgrades the pick's tier; `value_team` names the side the model
-    prefers. Tiers are derived from the published, rounded values, so anyone can recompute them from the JSON.
+    `STAT MISMATCH` flags a large disagreement between the play-by-play model and the betting line. It is **not** a
+    betting edge, and the newsletter, dashboard and LLM prompt say so: the display label is "STAT MISMATCH (Model vs.
+    Market)" (`model.TIER_LABELS`). Because of the cap, tiers are derived for the whole week (`model.week_tiers`) from
+    the published, rounded values, so anyone can recompute them from the JSON.
 
 ## 5. Data contracts and pipeline behavior
 
@@ -143,17 +145,17 @@ One row per scheduled game, played or upcoming. The column groups are defined in
 Validated by `tests/test_leakage.py`. Perturbing a game's own play-by-play or score must leave its features
 bit-identical, and rebuilding every game from history cut at its kickoff must match the full build.
 
-### Contract B — weekly predictions (schema `1.2.0`)
+### Contract B — weekly predictions (schema `1.3.0`)
 
 Written to `data/predictions/current_week.json` (latest run) and `week_XX_YYYY_preds.json` (archive). Validated by
 `src.model.validate_contract_b`.
 
 | Field | Type / meaning |
 |---|---|
-| `contract`, `schema_version` | `"B"`, `"1.2.0"` |
+| `contract`, `schema_version` | `"B"`, `"1.3.0"` |
 | `generated_at` | ISO-8601 UTC prediction time |
 | `season`, `week` | int |
-| `model` | Fields:<br>`algorithm` and `hyperparameters`<br>`train_seasons` (all ≤ season-2)<br>`calibration_season` (= season-1)<br>`market_weight` ∈ [0,1] and `market_weight_source` (`optimized` or `default`)<br>`weight_fit`, an in-sample Brier summary<br>`input_defaults`<br>`tier_thresholds` {`lock_min_win_prob`, `value_edge_min_pct`, `lean_min_win_prob`} |
+| `model` | Fields:<br>`algorithm` and `hyperparameters`<br>`train_seasons` (all ≤ season-2)<br>`calibration_season` (= season-1)<br>`market_weight` ∈ [0,1] and `market_weight_source` (`optimized` or `default`)<br>`weight_fit`, an in-sample Brier summary<br>`input_defaults`<br>`tier_thresholds` {`lock_min_win_prob`, `mismatch_min_pct`, `mismatch_max_per_week`, `lean_min_win_prob`} |
 | `tier_rules` | {tier → human-readable rule}; must match `model.tier_thresholds` |
 | `games[]` | One object per game of the week (fields below) |
 
@@ -171,12 +173,12 @@ Per game:
 | `pick` | {`team`, `side`, `win_prob`}: the side `final` favors |
 | `model_edge_pct` | `100·(model − market)` on the pick side, in percentage points; null without a market line |
 | `value_team`, `value_edge_pct` | The side the model rates above the market, and by how much |
-| `confidence_tier` | `LOCK`, `VALUE EDGE`, `LEAN` or `COIN FLIP` (Section 4.11) |
+| `confidence_tier` | `LOCK`, `STAT MISMATCH`, `LEAN` or `COIN FLIP` (Section 4.11; validated for the whole week) |
 | `top_drivers[]` | ≤ 3 objects {`feature`, `label`, `value`, `impact_logit`, `favors`}, ordered by abs(`impact_logit`); observed inputs only |
 | `imputed_inputs[]` | Venue inputs that took `MODEL_INPUT_DEFAULTS` |
 | `result` | {`home_score`, `away_score`} when `final`, otherwise null |
 
-### Contract C — enriched weekly report (schema `1.0.0`)
+### Contract C — enriched weekly report (schema `1.1.0`)
 
 Written to `data/predictions/weekly_report_enriched.json` (latest run) and `week_XX_YYYY_enriched.json` (archive).
 Validated by `src.report_generator.validate_contract_c`, which also re-validates the embedded Contract B and
@@ -288,7 +290,8 @@ All settings live in `config.Settings`, populated from the environment or `.env`
 | `ODDS_API_KEY` | — | Required for live odds |
 | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | — | Required for LLM reports |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model |
-| `NFL_VALUE_EDGE_MIN_PCT` | `8.0` | VALUE EDGE threshold, in percentage points |
+| `NFL_STAT_MISMATCH_MIN_PCT` | `8.0` | STAT MISMATCH threshold: \|model − market\| on the pick, in percentage points |
+| `NFL_STAT_MISMATCH_MAX_PER_WEEK` | `2` | STAT MISMATCH games per week, largest gaps first (0 turns the tier off) |
 | `NFL_TIER_LOCK_MIN_WIN_PROB` | `0.75` | LOCK threshold |
 | `NFL_TIER_LEAN_MIN_WIN_PROB` | `0.55` | LEAN threshold |
 | `NFL_START_SEASON` | `2016` | First cached season |

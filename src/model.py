@@ -90,31 +90,60 @@ RANDOM_STATE: Final[int] = 42
 DEFAULT_MARKET_WEIGHT: Final[float] = 0.60
 MIN_BLEND_GAMES: Final[int] = 100  # fewer validation games with a market line -> keep the default weight
 
-Tier = Literal["LOCK", "VALUE EDGE", "LEAN", "COIN FLIP"]
-TIERS: Final[tuple[str, ...]] = ("LOCK", "VALUE EDGE", "LEAN", "COIN FLIP")
+Tier = Literal["LOCK", "STAT MISMATCH", "LEAN", "COIN FLIP"]
+TIERS: Final[tuple[str, ...]] = ("LOCK", "STAT MISMATCH", "LEAN", "COIN FLIP")
+# How tiers read in the dashboard and the newsletter. STAT MISMATCH flags a large gap between the play-by-play model
+# and the betting market, in either direction. It is a disagreement worth reading about, not a betting edge.
+TIER_LABELS: Final[dict[str, str]] = {
+    "LOCK": "LOCK",
+    "STAT MISMATCH": "STAT MISMATCH (Model vs. Market)",
+    "LEAN": "LEAN",
+    "COIN FLIP": "COIN FLIP",
+}
 
 
 @dataclass(frozen=True, slots=True)
 class TierThresholds:
     """Confidence-tier cut-offs. Defaults come from settings (env ``NFL_TIER_LOCK_MIN_WIN_PROB``,
-    ``NFL_VALUE_EDGE_MIN_PCT``, ``NFL_TIER_LEAN_MIN_WIN_PROB``); each Contract B payload records the
-    values it was built with in ``model.tier_thresholds``."""
+    ``NFL_STAT_MISMATCH_MIN_PCT``, ``NFL_STAT_MISMATCH_MAX_PER_WEEK``, ``NFL_TIER_LEAN_MIN_WIN_PROB``); each
+    Contract B payload records the values it was built with in ``model.tier_thresholds``."""
 
     lock_min_win_prob: float = 0.75  # pick's final win probability (and the model must favour the pick)
-    value_edge_min_pct: float = 8.0  # model above the market on the pick side, percentage points
+    mismatch_min_pct: float = 8.0  # |model - market| on the pick side, percentage points
+    mismatch_max_per_week: int = 2  # only the week's largest gaps; the rest take their LEAN / COIN FLIP tier
     lean_min_win_prob: float = 0.55
 
     @classmethod
     def from_settings(cls, cfg: Settings = settings) -> TierThresholds:
-        return cls(cfg.tier_lock_min_win_prob, cfg.tier_value_edge_min_pct, cfg.tier_lean_min_win_prob)
+        return cls(
+            lock_min_win_prob=cfg.tier_lock_min_win_prob,
+            mismatch_min_pct=cfg.tier_mismatch_min_pct,
+            mismatch_max_per_week=cfg.tier_mismatch_max_per_week,
+            lean_min_win_prob=cfg.tier_lean_min_win_prob,
+        )
 
     def rules(self) -> dict[str, str]:
         return {
             "LOCK": f"pick win probability >= {self.lock_min_win_prob:.0%} and the model also favours the pick",
-            "VALUE EDGE": f"model rates the pick >= {self.value_edge_min_pct:g} percentage points above the market",
+            "STAT MISMATCH": (
+                f"the play-by-play model and the market differ by >= {self.mismatch_min_pct:g} percentage points on "
+                f"the pick, in either direction; at most {self.mismatch_max_per_week} per week, largest gaps first "
+                "(the rest take LEAN or COIN FLIP); a disagreement, not a betting edge"
+            ),
             "LEAN": f"pick win probability >= {self.lean_min_win_prob:.0%}",
             "COIN FLIP": "otherwise",
         }
+
+
+@dataclass(frozen=True, slots=True)
+class TierInput:
+    """The published values one game's tier is derived from (so anyone can recompute tiers from the JSON)."""
+
+    game_id: str
+    kickoff_utc: str  # ISO-8601 UTC; sorts chronologically
+    pick_win_prob: float
+    model_edge_pct: float | None  # model minus market on the pick, percentage points
+    model_pick_win_prob: float
 
 
 TOP_DRIVERS: Final[int] = 3
@@ -130,7 +159,7 @@ TOP_DRIVERS: Final[int] = 3
 MODEL_INPUT_DEFAULTS: Final[dict[str, float]] = {"is_outdoor": 0.0, "is_high_wind_outdoor": 0.0}
 
 CONTRACT_NAME: Final[str] = "B"
-CONTRACT_VERSION: Final[str] = "1.2.0"
+CONTRACT_VERSION: Final[str] = "1.3.0"
 GAME_STATUSES: Final[tuple[str, ...]] = ("scheduled", "in_progress", "final")
 # nflverse_close: line for a game that has kicked off; nflverse_line: pre-game line as last fetched.
 MARKET_SOURCES: Final[tuple[str, ...]] = ("odds_api", "odds_api_snapshot", "nflverse_close", "nflverse_line")
@@ -789,25 +818,55 @@ def confidence_tier(
     model_pick_win_prob: float,
     thresholds: TierThresholds | None = None,
 ) -> Tier:
-    """Map a pick to a tier (first match wins; defaults in brackets, see :class:`TierThresholds`).
+    """One pick's tier before the weekly cap (first match wins; defaults in brackets, see :class:`TierThresholds`).
 
-    LOCK        the pick's final win probability is >= lock_min_win_prob [75%] and the model also favours the pick
-    VALUE EDGE  the model rates the pick >= value_edge_min_pct [8] percentage points above the market
-    LEAN        the pick's final win probability is >= lean_min_win_prob [55%]
-    COIN FLIP   everything else
+    LOCK           the pick's final win probability is >= lock_min_win_prob [75%] and the model also favours it
+    STAT MISMATCH  the model and the market differ by >= mismatch_min_pct [8] percentage points on the pick, in
+                   either direction
+    LEAN           the pick's final win probability is >= lean_min_win_prob [55%]
+    COIN FLIP      everything else
 
-    The edge is directional. When the model rates the *other* side above the
-    market, ``value_team`` names that side, and the disagreement never upgrades
-    the pick's tier.
+    :func:`week_tiers` applies the cap of ``mismatch_max_per_week`` [2] STAT MISMATCH games per week.
     """
     t = thresholds or TierThresholds.from_settings()
     if pick_win_prob >= t.lock_min_win_prob and model_pick_win_prob >= 0.5:
         return "LOCK"
-    if model_edge_pct is not None and model_edge_pct >= t.value_edge_min_pct:
-        return "VALUE EDGE"
-    if pick_win_prob >= t.lean_min_win_prob:
-        return "LEAN"
-    return "COIN FLIP"
+    if model_edge_pct is not None and abs(model_edge_pct) >= t.mismatch_min_pct and t.mismatch_max_per_week > 0:
+        return "STAT MISMATCH"
+    return probability_tier(pick_win_prob, t)
+
+
+def probability_tier(pick_win_prob: float, thresholds: TierThresholds) -> Tier:
+    """LEAN or COIN FLIP, from the pick's final win probability alone."""
+    return "LEAN" if pick_win_prob >= thresholds.lean_min_win_prob else "COIN FLIP"
+
+
+def week_tiers(games: Sequence[TierInput], thresholds: TierThresholds | None = None) -> list[Tier]:
+    """Tiers for one week's games, with at most ``mismatch_max_per_week`` STAT MISMATCH games.
+
+    The largest gaps keep the tier (ties go to the earlier kickoff, then the lower ``game_id``); the others fall
+    through to LEAN or COIN FLIP.
+    """
+    t = thresholds or TierThresholds.from_settings()
+    tiers = [confidence_tier(g.pick_win_prob, g.model_edge_pct, g.model_pick_win_prob, t) for g in games]
+    ranked = sorted(
+        (i for i, tier in enumerate(tiers) if tier == "STAT MISMATCH"),
+        key=lambda i: (-abs(games[i].model_edge_pct or 0.0), games[i].kickoff_utc, games[i].game_id),
+    )
+    for i in ranked[t.mismatch_max_per_week :]:
+        tiers[i] = probability_tier(games[i].pick_win_prob, t)
+    return tiers
+
+
+def tier_input(game: dict[str, Any]) -> TierInput:
+    side = game["pick"]["side"]
+    return TierInput(
+        game_id=game["game_id"],
+        kickoff_utc=game["kickoff_utc"],
+        pick_win_prob=game["pick"]["win_prob"],
+        model_edge_pct=game["model_edge_pct"],
+        model_pick_win_prob=game["model"][f"{side}_wp"],
+    )
 
 
 def top_drivers(
@@ -860,9 +919,9 @@ def _decision_fields(
     model_pair: dict[str, float],
     market_pair: dict[str, float] | None,
     final_pair: dict[str, float],
-    thresholds: TierThresholds | None = None,
 ) -> dict[str, Any]:
-    """Pick, edge, value side and tier, all derived from the *published* (rounded) probabilities.
+    """Pick, edge and value side, all derived from the *published* (rounded) probabilities. Tiers need the whole
+    week (:func:`week_tiers`).
 
     :func:`validate_contract_b` re-derives these from the JSON with this same function.
     """
@@ -880,7 +939,6 @@ def _decision_fields(
         "model_edge_pct": edge_pick,
         "value_side": value_side,
         "value_edge_pct": None if value_side is None else abs(edge_home),
-        "tier": confidence_tier(pick_wp, edge_pick, model_pair[f"{side}_wp"], thresholds),
     }
 
 
@@ -904,7 +962,7 @@ def build_payload(
     * ``model_edge_pct``: ``100 * (model - market)`` on the pick side, in percentage points (negative means
       the market rates the pick higher than the model does);
     * ``value_team`` / ``value_edge_pct``: the side the model rates above the market, and by how much;
-    * ``confidence_tier``: :func:`confidence_tier` on the published values;
+    * ``confidence_tier``: :func:`week_tiers` on the published values (STAT MISMATCH capped per week);
     * ``top_drivers``: :func:`top_drivers` (observed inputs only), explained against the uncalibrated log-odds;
     * ``imputed_inputs``: venue inputs unknown before kickoff that took :data:`MODEL_INPUT_DEFAULTS`.
     """
@@ -925,7 +983,7 @@ def build_payload(
         model_pair = _probability_pair(model_p[i])
         market_pair = _probability_pair(market_p[i]) if has_market else None
         final_pair = _probability_pair(final_p[i])
-        decision = _decision_fields(model_pair, market_pair, final_pair, thresholds)
+        decision = _decision_fields(model_pair, market_pair, final_pair)
         side = decision["side"]
         status = _game_status(row, now)
         games.append(
@@ -963,7 +1021,7 @@ def build_payload(
                 "model_edge_pct": decision["model_edge_pct"],
                 "value_team": None if decision["value_side"] is None else row[f"{decision['value_side']}_team"],
                 "value_edge_pct": decision["value_edge_pct"],
-                "confidence_tier": decision["tier"],
+                "confidence_tier": None,  # set below, once the whole week is known
                 "top_drivers": top_drivers(contributions[i], raw_values[i], home, away),
                 "imputed_inputs": [
                     c for c in MODEL_INPUT_DEFAULTS if not math.isfinite(raw_values[i][column_index[c]])
@@ -973,6 +1031,9 @@ def build_payload(
                 ),
             }
         )
+
+    for game, tier in zip(games, week_tiers([tier_input(g) for g in games], thresholds), strict=True):
+        game["confidence_tier"] = tier
 
     split, blend = fold.split, fold.blend
     return {
@@ -1036,13 +1097,23 @@ def _parse_iso(x: Any) -> datetime | None:
 
 
 def _parse_thresholds(raw: Any) -> TierThresholds | None:
-    keys = ("lock_min_win_prob", "value_edge_min_pct", "lean_min_win_prob")
+    keys = ("lock_min_win_prob", "mismatch_min_pct", "mismatch_max_per_week", "lean_min_win_prob")
     if not isinstance(raw, dict) or set(raw) != set(keys) or not all(_is_num(raw[k]) for k in keys):
         return None
-    t = TierThresholds(**{k: float(raw[k]) for k in keys})
-    if not (0.5 <= t.lean_min_win_prob <= t.lock_min_win_prob <= 1.0 and 0.0 < t.value_edge_min_pct <= 100.0):
+    if not _is_int(raw["mismatch_max_per_week"]):
         return None
-    return t
+    t = TierThresholds(
+        lock_min_win_prob=float(raw["lock_min_win_prob"]),
+        mismatch_min_pct=float(raw["mismatch_min_pct"]),
+        mismatch_max_per_week=raw["mismatch_max_per_week"],
+        lean_min_win_prob=float(raw["lean_min_win_prob"]),
+    )
+    valid = (
+        0.5 <= t.lean_min_win_prob <= t.lock_min_win_prob <= 1.0
+        and 0.0 < t.mismatch_min_pct <= 100.0
+        and t.mismatch_max_per_week >= 0
+    )
+    return t if valid else None
 
 
 def _close(a: Any, b: Any, tol: float) -> bool:
@@ -1099,8 +1170,8 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
         thresholds = _parse_thresholds(model.get("tier_thresholds"))
         check(
             thresholds is not None,
-            "model.tier_thresholds must hold lock_min_win_prob, value_edge_min_pct, lean_min_win_prob "
-            "with 0.5 <= lean <= lock <= 1 and 0 < value_edge <= 100",
+            "model.tier_thresholds must hold lock_min_win_prob, mismatch_min_pct, mismatch_max_per_week, "
+            "lean_min_win_prob with 0.5 <= lean <= lock <= 1, 0 < mismatch_min_pct <= 100, max_per_week >= 0",
         )
         if thresholds is not None:
             check(payload.get("tier_rules") == thresholds.rules(), "tier_rules must describe model.tier_thresholds")
@@ -1204,7 +1275,7 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
             )
         elif market is None:
             check(game["final"] == game["model"], f"{where}: final must equal model when there is no market line")
-        expected = _decision_fields(game["model"], market, game["final"], thresholds)
+        expected = _decision_fields(game["model"], market, game["final"])
         pick = game["pick"]
         if not isinstance(pick, dict):
             problems.append(f"{where}: pick must be an object")
@@ -1235,12 +1306,6 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
                 f"{where}: value_edge_pct inconsistent",
             )
         check(game["confidence_tier"] in TIERS, f"{where}: confidence_tier must be one of {TIERS}")
-        if _is_prob(pick.get("win_prob")) and (edge is None or _is_num(edge)):
-            tier = confidence_tier(pick["win_prob"], edge, game["model"][f"{expected['side']}_wp"], thresholds)
-            check(
-                game["confidence_tier"] == tier,
-                f"{where}: confidence_tier {game['confidence_tier']!r} contradicts tier_rules (expected {tier!r})",
-            )
 
         drivers = game["top_drivers"]
         if isinstance(drivers, list) and len(drivers) <= TOP_DRIVERS:
@@ -1273,6 +1338,16 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
             )
         else:
             check(result is None, f"{where}: result must be null unless status is final")
+
+    if thresholds is not None and not problems:
+        # STAT MISMATCH is capped per week, so tiers are re-derived for the whole week once every game is well formed.
+        expected_tiers = week_tiers([tier_input(g) for g in games], thresholds)
+        for n, (game, tier) in enumerate(zip(games, expected_tiers, strict=True)):
+            check(
+                game["confidence_tier"] == tier,
+                f"games[{n}] ({game['game_id']}): confidence_tier {game['confidence_tier']!r} contradicts tier_rules "
+                f"(expected {tier!r})",
+            )
 
 
 # --------------------------------------------------------------------------- #

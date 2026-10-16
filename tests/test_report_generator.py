@@ -422,7 +422,7 @@ def test_run_report_writes_contract_c_and_newsletter(payload, cfg):
         assert f"{game['away_team']} @ {game['home_team']} — {game['report']['headline']}" in md
         assert game["report"]["the_pick_summary"] in md
     for tier in {g["confidence_tier"] for g in contract_c["games"]}:
-        assert re.search(rf"^## {tier.title()}s$", md, re.MULTILINE)
+        assert re.search(rf"^## {re.escape(R.SECTION_TITLES[tier])}$", md, re.MULTILINE)
     assert "Brier score model 0.2329" in md and "Not betting advice" in md
 
 

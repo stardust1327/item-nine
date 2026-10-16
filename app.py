@@ -34,7 +34,7 @@ SOURCE_LABELS: Final[dict[str, str]] = {
 }
 TIER_BADGE_COLORS: Final[dict[str, str]] = {
     "LOCK": "blue",
-    "VALUE EDGE": "violet",
+    "STAT MISMATCH": "violet",
     "LEAN": "green",
     "COIN FLIP": "gray",
 }
@@ -478,7 +478,10 @@ def _render_overview(st: Any, b: dict[str, Any]) -> None:
 def _render_cards(st: Any, c: dict[str, Any]) -> None:
     st.subheader("Scouting reports")
     present = [t for t in M.TIERS if any(g["confidence_tier"] == t for g in c["games"])]
-    chosen = st.pills("Tiers", present, selection_mode="multi", default=present, key="tiers") or []
+    chosen = (
+        st.pills("Tiers", present, selection_mode="multi", default=present, format_func=M.TIER_LABELS.get, key="tiers")
+        or []
+    )
     games = sorted(
         (g for g in c["games"] if g["confidence_tier"] in chosen),
         key=lambda g: (M.TIERS.index(g["confidence_tier"]), g["kickoff_utc"]),
@@ -491,7 +494,8 @@ def _render_cards(st: Any, c: dict[str, Any]) -> None:
             top = st.columns([4, 1])
             top[0].markdown(f"##### {R.md_text(report['headline'])}")
             with top[1]:
-                st.badge(game["confidence_tier"], color=TIER_BADGE_COLORS[game["confidence_tier"]])
+                tier = game["confidence_tier"]
+                st.badge(M.TIER_LABELS[tier], color=TIER_BADGE_COLORS[tier])
             market = pick_side(game, game["market"])
             st.caption(
                 f"{matchup(game)} · {R.local_kickoff(game['kickoff_utc'])} · pick {game['pick']['team']} "

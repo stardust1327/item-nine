@@ -55,10 +55,16 @@ logger = logging.getLogger("src.report_generator" if __name__ == "__main__" else
 # Parameters
 # --------------------------------------------------------------------------- #
 CONTRACT_NAME: Final[str] = "C"
-CONTRACT_VERSION: Final[str] = "1.0.0"
+CONTRACT_VERSION: Final[str] = "1.1.0"
 PROVIDER: Final[str] = "google-genai"
 TEMPLATE_GENERATOR: Final[str] = "template"
-TIER_ORDER: Final[tuple[str, ...]] = M.TIERS  # LOCK, VALUE EDGE, LEAN, COIN FLIP
+TIER_ORDER: Final[tuple[str, ...]] = M.TIERS  # LOCK, STAT MISMATCH, LEAN, COIN FLIP
+SECTION_TITLES: Final[dict[str, str]] = {
+    "LOCK": "Locks",
+    "STAT MISMATCH": "Stat mismatches (model vs. market)",
+    "LEAN": "Leans",
+    "COIN FLIP": "Coin flips",
+}
 ALWAYS_ALLOWED_PERCENTAGES: Final[frozenset[float]] = frozenset({50.0})  # "a 50/50 game", "50% coin flip"
 # Hype and betting calls, matched on normalised text (NFKC, ASCII quotes and dashes, no zero-width characters).
 BANNED_PATTERNS: Final[tuple[str, ...]] = (
@@ -82,7 +88,7 @@ _PERCENT_RE: Final = re.compile(
 _MARKUP_RE: Final = re.compile(
     r"<\s*[!/a-zA-Z]|```|~~|`|\]\(|!\[|https?://|\bwww\.|\*|__|^\s*(?:#|>|[-+]\s|\d+[.)]\s|\|)",
 )
-_TIER_TOKEN_RE: Final = re.compile(r"\b(LOCK|VALUE EDGE|LEAN|COIN FLIP)\b")
+_TIER_TOKEN_RE: Final = re.compile(r"\b(" + "|".join(re.escape(t) for t in M.TIERS) + r")\b")
 
 Mode = Literal["llm", "template"]
 
@@ -574,6 +580,8 @@ Rules:
    - key_mismatch: 1-2 sentences on the top statistical driver(s) and which team they favor.
    - risk_factor: 1-2 sentences on the main way this pick could go wrong (for example the model and market
      disagreeing, a near coin-flip probability, inputs unknown before kickoff, or a rest disadvantage).
+7. A STAT MISMATCH tier means the play-by-play model and the betting market disagree by a wide margin on this game,
+   in either direction. Describe it as the numbers and the line disagreeing, never as an edge, value or opportunity.
 """
 
 
@@ -795,7 +803,7 @@ def template_report(facts: GameFacts) -> ScoutingReport:
 
     headline = {
         "LOCK": f"{team_nickname(pick)} are clear favorites over the {team_nickname(other)}",
-        "VALUE EDGE": f"Model sees value in the {team_nickname(pick)} against the {team_nickname(other)}",
+        "STAT MISMATCH": f"The numbers and the line split on the {team_nickname(pick)} and the {team_nickname(other)}",
         "LEAN": f"Slight lean to the {team_nickname(pick)} over the {team_nickname(other)}",
         "COIN FLIP": f"{team_nickname(pick)} and {team_nickname(other)} are close to a coin flip",
     }[tier]
@@ -826,7 +834,12 @@ def template_report(facts: GameFacts) -> ScoutingReport:
 
     value = sheet["model_value_side"]
     rest = sheet["rest"]
-    if value and value["team"] != team_name(pick):
+    if tier == "STAT MISMATCH" and value and value["team"] == team_name(pick):
+        risk = (
+            f"The model rates the {value['team']} {value['edge_pct_points']:.1f} percentage points above the market, "
+            "and a gap that large often means the line knows something the play-by-play numbers miss."
+        )
+    elif value and value["team"] != team_name(pick):
         risk = (
             f"The model rates the {value['team']} {value['edge_pct_points']:.1f} percentage points above the market, "
             "so it is less sure of this pick than the line suggests."
@@ -1231,7 +1244,7 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
         group = [g for g in upcoming if g["confidence_tier"] == tier]
         if not group:
             continue
-        lines += ["", f"## {tier.title()}s", ""]
+        lines += ["", f"## {SECTION_TITLES[tier]}", ""]
         for g in sorted(group, key=lambda x: -x["pick"]["win_prob"]):
             lines += _game_section(g)
     if finished:
@@ -1240,7 +1253,7 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
             lines += _game_section(g)
 
     lines += ["", "## How to read this", ""]
-    lines += [f"- **{tier}**: {contract_c['tier_rules'][tier]}." for tier in TIER_ORDER]
+    lines += [f"- **{M.TIER_LABELS[tier]}**: {contract_c['tier_rules'][tier]}." for tier in TIER_ORDER]
     lines.append(
         "- **Model vs market** is the model's win probability for the pick minus the de-vigged market's, in "
         "percentage points. The final number blends the two."
@@ -1268,7 +1281,8 @@ def _game_section(g: dict[str, Any]) -> list[str]:
     lines = [
         f"### {g['away_team']} @ {g['home_team']} — {md_text(report['headline'])}",
         "",
-        f"**Pick:** {g['pick']['team']} {pct_text(g['pick']['win_prob'])} · **Tier:** {g['confidence_tier']} · "
+        f"**Pick:** {g['pick']['team']} {pct_text(g['pick']['win_prob'])} · "
+        f"**Tier:** {M.TIER_LABELS[g['confidence_tier']]} · "
         f"**Model:** {g['pick']['team']} {pct_text(g['model'][f'{side}_wp'])} · **Market:** {market_text} · "
         f"**Kickoff:** {local_kickoff(g['kickoff_utc'])}",
         "",

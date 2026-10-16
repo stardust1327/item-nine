@@ -224,12 +224,12 @@ def test_metrics():
     ("win_prob", "edge", "model_pick", "tier"),
     [
         (0.80, None, 0.78, "LOCK"),
-        (0.75, -9.0, 0.66, "LOCK"),  # the model still favours the pick
-        (0.78, -30.0, 0.45, "LEAN"),  # strong final, but the model picks the other side: not a LOCK
-        (0.62, 6.0, 0.68, "VALUE EDGE"),
-        (0.52, 5.0, 0.57, "VALUE EDGE"),  # value on the pick, even near a coin flip
-        (0.52, -5.0, 0.47, "COIN FLIP"),  # value is on the OTHER side: never upgrades the pick
-        (0.62, -12.0, 0.50, "LEAN"),
+        (0.75, -9.0, 0.66, "LOCK"),  # LOCK comes first, even with a large gap, while the model favours the pick
+        (0.78, -30.0, 0.45, "STAT MISMATCH"),  # strong final, but the model picks the other side: not a LOCK
+        (0.62, 6.0, 0.68, "STAT MISMATCH"),
+        (0.52, 5.0, 0.57, "STAT MISMATCH"),  # near a coin flip, still a big gap
+        (0.52, -5.0, 0.47, "STAT MISMATCH"),  # a gap against the pick counts too: it is a disagreement, not an edge
+        (0.62, -4.99, 0.57, "LEAN"),
         (0.62, 4.99, 0.67, "LEAN"),
         (0.55, None, 0.55, "LEAN"),
         (0.54, 1.0, 0.55, "COIN FLIP"),
@@ -237,30 +237,64 @@ def test_metrics():
     ],
 )
 def test_confidence_tier(win_prob, edge, model_pick, tier):
-    five_points = M.TierThresholds(lock_min_win_prob=0.75, value_edge_min_pct=5.0, lean_min_win_prob=0.55)
+    five_points = M.TierThresholds(lock_min_win_prob=0.75, mismatch_min_pct=5.0, lean_min_win_prob=0.55)
     assert M.confidence_tier(win_prob, edge, model_pick, five_points) == tier
 
 
 @pytest.mark.parametrize(
     ("win_prob", "edge", "model_pick", "tier"),
     [
-        (0.62, 6.0, 0.68, "LEAN"),  # a VALUE EDGE at 5 points is calibration noise at the 8-point default
+        (0.62, 6.0, 0.68, "LEAN"),  # below the 8-point default
         (0.52, 7.99, 0.60, "COIN FLIP"),
-        (0.52, 8.0, 0.60, "VALUE EDGE"),
-        (0.66, 12.5, 0.785, "VALUE EDGE"),
+        (0.52, 8.0, 0.60, "STAT MISMATCH"),
+        (0.66, -12.5, 0.535, "STAT MISMATCH"),
     ],
 )
-def test_default_value_edge_threshold_is_eight_points(win_prob, edge, model_pick, tier):
-    assert settings.tier_value_edge_min_pct == 8.0
-    assert M.TierThresholds.from_settings().value_edge_min_pct == 8.0
+def test_default_stat_mismatch_threshold_is_eight_points(win_prob, edge, model_pick, tier):
+    assert (settings.tier_mismatch_min_pct, settings.tier_mismatch_max_per_week) == (8.0, 2)
+    assert M.TierThresholds.from_settings() == M.TierThresholds()
     assert M.confidence_tier(win_prob, edge, model_pick) == tier
 
 
+def _tier_game(game_id: str, hour: int, pick: float, edge: float | None, model_pick: float) -> M.TierInput:
+    return M.TierInput(game_id, f"2026-10-18T{hour:02d}:00:00Z", pick, edge, model_pick)
+
+
+def test_stat_mismatch_is_capped_at_the_largest_gaps_of_the_week():
+    games = [
+        _tier_game("a", 13, 0.62, 9.0, 0.70),  # ties c on the gap but kicks off earlier: kept
+        _tier_game("b", 17, 0.52, -14.0, 0.38),  # largest gap (against the pick): kept
+        _tier_game("c", 16, 0.53, 9.0, 0.60),  # over the cap: falls through to its probability tier
+        _tier_game("d", 13, 0.80, -12.0, 0.66),  # LOCK first; does not use a slot
+        _tier_game("e", 20, 0.60, 7.9, 0.66),  # below the threshold
+        _tier_game("f", 20, 0.58, None, 0.58),  # no market line
+    ]
+    assert M.week_tiers(games, M.TierThresholds()) == [
+        "STAT MISMATCH",
+        "STAT MISMATCH",
+        "COIN FLIP",
+        "LOCK",
+        "LEAN",
+        "LEAN",
+    ]
+    one = M.TierThresholds(mismatch_max_per_week=1)
+    assert M.week_tiers(games, one)[:3] == ["LEAN", "STAT MISMATCH", "COIN FLIP"]
+    assert "STAT MISMATCH" not in M.week_tiers(games, M.TierThresholds(mismatch_max_per_week=0))
+    assert M.week_tiers(games, M.TierThresholds(mismatch_max_per_week=5)).count("STAT MISMATCH") == 3
+    same_kickoff = [_tier_game("y", 13, 0.62, 9.0, 0.70), _tier_game("x", 13, 0.62, 9.0, 0.70)]
+    assert M.week_tiers(same_kickoff, one) == ["LEAN", "STAT MISMATCH"]  # full tie: lower game_id wins
+
+
 def test_tier_thresholds_come_from_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("NFL_VALUE_EDGE_MIN_PCT", "6.5")
+    monkeypatch.setenv("NFL_STAT_MISMATCH_MIN_PCT", "6.5")
+    monkeypatch.setenv("NFL_STAT_MISMATCH_MAX_PER_WEEK", "3")
     monkeypatch.setenv("NFL_TIER_LOCK_MIN_WIN_PROB", "0.8")
     cfg = Settings.from_env(project_root=tmp_path)
-    assert M.TierThresholds.from_settings(cfg) == M.TierThresholds(0.8, 6.5, 0.55)
+    assert M.TierThresholds.from_settings(cfg) == M.TierThresholds(0.8, 6.5, 3, 0.55)
+    monkeypatch.setenv("NFL_STAT_MISMATCH_MAX_PER_WEEK", "-1")
+    with pytest.raises(ValueError, match="Tier thresholds"):
+        Settings.from_env(project_root=tmp_path)
+    monkeypatch.setenv("NFL_STAT_MISMATCH_MAX_PER_WEEK", "2")
     monkeypatch.setenv("NFL_TIER_LEAN_MIN_WIN_PROB", "0.9")  # lean above lock is rejected
     with pytest.raises(ValueError, match="Tier thresholds"):
         Settings.from_env(project_root=tmp_path)
@@ -269,35 +303,52 @@ def test_tier_thresholds_come_from_env(tmp_path, monkeypatch):
 def test_payload_records_and_is_validated_against_its_own_thresholds(league):
     features, schedules = league
     market = M.nflverse_market_probs(schedules)
-    loose = M.TierThresholds(0.75, 1.0, 0.55)
+    loose = M.TierThresholds(lock_min_win_prob=0.75, mismatch_min_pct=1.0, mismatch_max_per_week=2)
     payload = M.predict_week(features, schedules, market, season=2026, week=6, now=NOW, thresholds=loose)
+    assert payload["schema_version"] == "1.3.0"
     assert payload["model"]["tier_thresholds"] == {
         "lock_min_win_prob": 0.75,
-        "value_edge_min_pct": 1.0,
+        "mismatch_min_pct": 1.0,
+        "mismatch_max_per_week": 2,
         "lean_min_win_prob": 0.55,
     }
-    assert "1 percentage points" in payload["tier_rules"]["VALUE EDGE"]
+    assert "1 percentage points" in payload["tier_rules"]["STAT MISMATCH"]
+    assert "not a betting edge" in payload["tier_rules"]["STAT MISMATCH"]
     M.validate_contract_b(payload)  # built under 1.0, valid under 1.0 even though settings say 8.0
+
+    games = payload["games"]
+    eligible = [g for g in games if g["confidence_tier"] != "LOCK" and g["model_edge_pct"] is not None]
+    eligible = [g for g in eligible if abs(g["model_edge_pct"]) >= 1.0]
+    assert len(eligible) > 2  # the cap binds this week
+    flagged = sorted(g["game_id"] for g in games if g["confidence_tier"] == "STAT MISMATCH")
+    largest = sorted(g["game_id"] for g in sorted(eligible, key=lambda g: -abs(g["model_edge_pct"]))[:2])
+    assert flagged == largest
+
+    over_cap = copy.deepcopy(payload)  # promoting a game that fell through gives a third STAT MISMATCH
+    fell_through = next(g for g in over_cap["games"] if g["game_id"] in {e["game_id"] for e in eligible} - set(flagged))
+    fell_through["confidence_tier"] = "STAT MISMATCH"
+    with pytest.raises(M.ContractError, match="contradicts tier_rules"):
+        M.validate_contract_b(over_cap)
     tampered = copy.deepcopy(payload)
-    tampered["model"]["tier_thresholds"]["value_edge_min_pct"] = 50.0  # tiers no longer follow the stated rule
+    tampered["model"]["tier_thresholds"]["mismatch_max_per_week"] = 3  # the stated rule no longer matches
     with pytest.raises(M.ContractError, match="tier_rules must describe|contradicts"):
         M.validate_contract_b(tampered)
     broken = copy.deepcopy(payload)
-    broken["model"]["tier_thresholds"] = {"lock_min_win_prob": 0.5, "value_edge_min_pct": 8.0, "lean_min_win_prob": 0.7}
+    broken["model"]["tier_thresholds"]["mismatch_max_per_week"] = 2.5
     with pytest.raises(M.ContractError, match="tier_thresholds"):
         M.validate_contract_b(broken)
 
 
-def test_tiers_in_payload_are_directional(payload):
+def test_tiers_in_payload_follow_the_rules(payload):
+    thresholds = payload["model"]["tier_thresholds"]
+    flagged = [g for g in payload["games"] if g["confidence_tier"] == "STAT MISMATCH"]
+    assert len(flagged) <= thresholds["mismatch_max_per_week"]
     for game in payload["games"]:
         side = game["pick"]["side"]
-        if game["confidence_tier"] == "VALUE EDGE":
-            assert game["value_team"] == game["pick"]["team"]
-            assert game["model_edge_pct"] >= payload["model"]["tier_thresholds"]["value_edge_min_pct"]
+        if game["confidence_tier"] == "STAT MISMATCH":
+            assert abs(game["model_edge_pct"]) >= thresholds["mismatch_min_pct"]
         if game["confidence_tier"] == "LOCK":
             assert game["model"][f"{side}_wp"] >= 0.5
-        if game["value_team"] is not None and game["value_team"] != game["pick"]["team"]:
-            assert game["model_edge_pct"] < 0 and game["confidence_tier"] != "VALUE EDGE"
 
 
 # --------------------------------------------------------------------------- #
@@ -331,7 +382,7 @@ def test_game_without_market_line_uses_model_only(payload):
     game = no_line[0]
     assert game["final"] == game["model"]
     assert game["model_edge_pct"] is None and game["value_team"] is None
-    assert game["confidence_tier"] != "VALUE EDGE"
+    assert game["confidence_tier"] != "STAT MISMATCH"
 
 
 def test_drivers_are_aligned_with_the_true_signal(frame):

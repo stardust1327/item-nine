@@ -210,7 +210,8 @@ class Settings:
 
     # Confidence tiers (Contract B). Stored in each payload, which is validated against its own thresholds.
     tier_lock_min_win_prob: float  # LOCK: pick's final win probability at least this (and the model favours it)
-    tier_value_edge_min_pct: float  # VALUE EDGE: model at least this many points above the market on the pick
+    tier_mismatch_min_pct: float  # STAT MISMATCH: |model - market| on the pick at least this many points
+    tier_mismatch_max_per_week: int  # STAT MISMATCH: at most this many games per week (largest gaps first)
     tier_lean_min_win_prob: float  # LEAN: pick's final win probability at least this
 
     # LLM scouting reports (google-genai)
@@ -299,12 +300,14 @@ class Settings:
         if start_season < 1999:
             raise ValueError(f"NFL_START_SEASON must be >= 1999 (first nflverse pbp season), got {start_season}")
         lock = _env_float("NFL_TIER_LOCK_MIN_WIN_PROB", 0.75)
-        value_edge = _env_float("NFL_VALUE_EDGE_MIN_PCT", 8.0)
+        mismatch = _env_float("NFL_STAT_MISMATCH_MIN_PCT", 8.0)
+        mismatch_cap = _env_int("NFL_STAT_MISMATCH_MAX_PER_WEEK", 2)
         lean = _env_float("NFL_TIER_LEAN_MIN_WIN_PROB", 0.55)
-        if not (0.5 <= lean <= lock <= 1.0) or not (0.0 < value_edge <= 100.0):
+        if not (0.5 <= lean <= lock <= 1.0) or not (0.0 < mismatch <= 100.0) or mismatch_cap < 0:
             raise ValueError(
                 "Tier thresholds need 0.5 <= NFL_TIER_LEAN_MIN_WIN_PROB <= NFL_TIER_LOCK_MIN_WIN_PROB <= 1 "
-                f"and 0 < NFL_VALUE_EDGE_MIN_PCT <= 100; got lean={lean}, lock={lock}, value_edge={value_edge}"
+                f"and 0 < NFL_STAT_MISMATCH_MIN_PCT <= 100 and NFL_STAT_MISMATCH_MAX_PER_WEEK >= 0; got lean={lean}, "
+                f"lock={lock}, mismatch={mismatch}, max_per_week={mismatch_cap}"
             )
         weekday = _env_int("NFL_WEEKLY_REFRESH_WEEKDAY", 1)
         hour = _env_int("NFL_WEEKLY_REFRESH_HOUR_UTC", 12)
@@ -342,7 +345,8 @@ class Settings:
             odds_consensus_method=method,  # type: ignore[arg-type]
             spread_margin_sigma=_env_float("NFL_SPREAD_MARGIN_SIGMA", 13.45),
             tier_lock_min_win_prob=lock,
-            tier_value_edge_min_pct=value_edge,
+            tier_mismatch_min_pct=mismatch,
+            tier_mismatch_max_per_week=mismatch_cap,
             tier_lean_min_win_prob=lean,
             gemini_api_key=_env_str("GEMINI_API_KEY") or _env_str("GOOGLE_API_KEY"),
             gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash",
