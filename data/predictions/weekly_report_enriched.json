@@ -1,0 +1,1231 @@
+{
+  "contract": "C",
+  "schema_version": "1.1.0",
+  "generated_at": "2026-10-16T23:16:33Z",
+  "season": 2026,
+  "week": 6,
+  "source": {
+    "contract": "B",
+    "schema_version": "1.3.0",
+    "generated_at": "2026-10-16T23:16:32Z"
+  },
+  "generator": {
+    "provider": null,
+    "model": null,
+    "mode": "template",
+    "temperature": null,
+    "max_attempts": 0
+  },
+  "summary": {
+    "n_games": 14,
+    "n_llm": 0,
+    "n_template": 14,
+    "tiers": {
+      "LOCK": 4,
+      "STAT MISMATCH": 2,
+      "LEAN": 5,
+      "COIN FLIP": 3
+    }
+  },
+  "newsletter_path": "reports/week_06_2026.md",
+  "model": {
+    "algorithm": "XGBClassifier + CalibratedClassifierCV(method=\"sigmoid\")",
+    "hyperparameters": {
+      "max_depth": 4,
+      "learning_rate": 0.03,
+      "n_estimators": 250,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8
+    },
+    "train_seasons": [
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "calibration_season": 2025,
+    "market_weight": 0.7342,
+    "market_weight_source": "optimized",
+    "weight_fit": {
+      "season": 2025,
+      "in_sample": true,
+      "note": "market weight fit on these games; model probabilities cross-fitted (odd/even weeks)",
+      "brier_model": 0.2196,
+      "brier_market": 0.2109,
+      "brier_final": 0.2096,
+      "n_games": 284
+    },
+    "input_defaults": {
+      "is_outdoor": 0.0,
+      "is_high_wind_outdoor": 0.0
+    },
+    "tier_thresholds": {
+      "lock_min_win_prob": 0.75,
+      "mismatch_min_pct": 8.0,
+      "mismatch_max_per_week": 2,
+      "lean_min_win_prob": 0.55
+    }
+  },
+  "tier_rules": {
+    "LOCK": "pick win probability >= 75% and the model also favours the pick",
+    "STAT MISMATCH": "the play-by-play model and the market differ by >= 8 percentage points on the pick, in either direction; at most 2 per week, largest gaps first (the rest take LEAN or COIN FLIP); a disagreement, not a betting edge",
+    "LEAN": "pick win probability >= 55%",
+    "COIN FLIP": "otherwise"
+  },
+  "games": [
+    {
+      "game_id": "2026_06_SEA_DEN",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-16T00:15:00Z",
+      "status": "final",
+      "home_team": "DEN",
+      "away_team": "SEA",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.417,
+        "away_wp": 0.583,
+        "home_spread": 2.5,
+        "source": "nflverse_close",
+        "method": "nflverse_moneyline",
+        "books": null,
+        "as_of": null
+      },
+      "model": {
+        "home_wp": 0.4439,
+        "away_wp": 0.5561
+      },
+      "final": {
+        "home_wp": 0.4241,
+        "away_wp": 0.5759
+      },
+      "pick": {
+        "team": "SEA",
+        "side": "away",
+        "win_prob": 0.5759
+      },
+      "model_edge_pct": -2.69,
+      "value_team": "DEN",
+      "value_edge_pct": 2.69,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.0959,
+          "impact_logit": -0.235,
+          "favors": "SEA"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0416,
+          "impact_logit": -0.1784,
+          "favors": "SEA"
+        },
+        {
+          "feature": "home_off_early_down_sr_pre",
+          "label": "Home early-down success rate",
+          "value": 0.3877,
+          "impact_logit": 0.0835,
+          "favors": "DEN"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": {
+        "home_score": 17,
+        "away_score": 14
+      },
+      "report": {
+        "headline": "Slight lean to the Seahawks over the Broncos",
+        "the_pick_summary": "The blended forecast makes the Seattle Seahawks a 57.5% favorite (LEAN). The model has them at 55.6% against the market's 58.3%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.096 EPA per play in favor of the Seattle Seahawks), a moderate edge. Next: Early-down success rate gap (4.2 percentage points in favor of the Seattle Seahawks).",
+        "risk_factor": "The model rates the Denver Broncos 2.7 percentage points above the market, so it is less sure of this pick than the line suggests."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_HOU_JAX",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T13:30:00Z",
+      "status": "scheduled",
+      "home_team": "JAX",
+      "away_team": "HOU",
+      "venue": {
+        "is_neutral_site": true,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.5645,
+        "away_wp": 0.4355,
+        "home_spread": -2.5,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.7082,
+        "away_wp": 0.2918
+      },
+      "final": {
+        "home_wp": 0.6027,
+        "away_wp": 0.3973
+      },
+      "pick": {
+        "team": "JAX",
+        "side": "home",
+        "win_prob": 0.6027
+      },
+      "model_edge_pct": 14.37,
+      "value_team": "JAX",
+      "value_edge_pct": 14.37,
+      "confidence_tier": "STAT MISMATCH",
+      "top_drivers": [
+        {
+          "feature": "home_def_rush_epa_pre",
+          "label": "Home run defense EPA allowed",
+          "value": -0.3006,
+          "impact_logit": 0.3118,
+          "favors": "JAX"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0224,
+          "impact_logit": -0.248,
+          "favors": "HOU"
+        },
+        {
+          "feature": "net_rush_epa_mismatch",
+          "label": "Net rushing EPA mismatch",
+          "value": 0.331,
+          "impact_logit": 0.2086,
+          "favors": "JAX"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "The numbers and the line split on the Jaguars and the Texans",
+        "the_pick_summary": "The blended forecast makes the Jacksonville Jaguars a 60.2% favorite (STAT MISMATCH). The model has them at 70.8% against the market's 56.4%.",
+        "key_mismatch": "Jacksonville Jaguars run defense EPA allowed per rush is the biggest factor (-0.301 EPA per play), a moderate edge for the Jacksonville Jaguars. Next: Early-down success rate gap (2.2 percentage points in favor of the Houston Texans).",
+        "risk_factor": "The model rates the Jacksonville Jaguars 14.4 percentage points above the market, and a gap that large often means the line knows something the play-by-play numbers miss."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_BAL_CLE",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "CLE",
+      "away_team": "BAL",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.3884,
+        "away_wp": 0.6116,
+        "home_spread": 3.0,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.3011,
+        "away_wp": 0.6989
+      },
+      "final": {
+        "home_wp": 0.3652,
+        "away_wp": 0.6348
+      },
+      "pick": {
+        "team": "BAL",
+        "side": "away",
+        "win_prob": 0.6348
+      },
+      "model_edge_pct": 8.73,
+      "value_team": "BAL",
+      "value_edge_pct": 8.73,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.1167,
+          "impact_logit": -0.7049,
+          "favors": "BAL"
+        },
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.1474,
+          "impact_logit": -0.2343,
+          "favors": "BAL"
+        },
+        {
+          "feature": "diff_qb_cpoe",
+          "label": "QB CPOE edge",
+          "value": -12.405,
+          "impact_logit": -0.1124,
+          "favors": "BAL"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Slight lean to the Ravens over the Browns",
+        "the_pick_summary": "The blended forecast makes the Baltimore Ravens a 63.4% favorite (LEAN). The model has them at 69.8% against the market's 61.1%.",
+        "key_mismatch": "Early-down success rate gap is the biggest factor (11.7 percentage points in favor of the Baltimore Ravens), a strong edge. Next: Net passing EPA mismatch (0.147 EPA per play in favor of the Baltimore Ravens).",
+        "risk_factor": "The wind forecast was not known when this forecast was made, so conditions could shift it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_CAR_PHI",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "PHI",
+      "away_team": "CAR",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": -7,
+      "market": {
+        "home_wp": 0.3766,
+        "away_wp": 0.6234,
+        "home_spread": 3.5,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.328,
+        "away_wp": 0.672
+      },
+      "final": {
+        "home_wp": 0.3637,
+        "away_wp": 0.6363
+      },
+      "pick": {
+        "team": "CAR",
+        "side": "away",
+        "win_prob": 0.6363
+      },
+      "model_edge_pct": 4.86,
+      "value_team": "CAR",
+      "value_edge_pct": 4.86,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0922,
+          "impact_logit": -0.3409,
+          "favors": "CAR"
+        },
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.4125,
+          "impact_logit": -0.312,
+          "favors": "CAR"
+        },
+        {
+          "feature": "home_def_rush_epa_pre",
+          "label": "Home run defense EPA allowed",
+          "value": -0.1581,
+          "impact_logit": 0.1239,
+          "favors": "PHI"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Slight lean to the Panthers over the Eagles",
+        "the_pick_summary": "The blended forecast makes the Carolina Panthers a 63.6% favorite (LEAN). The model has them at 67.2% against the market's 62.3%.",
+        "key_mismatch": "Early-down success rate gap is the biggest factor (9.2 percentage points in favor of the Carolina Panthers), a moderate edge. Next: Net passing EPA mismatch (0.412 EPA per play in favor of the Carolina Panthers).",
+        "risk_factor": "The wind forecast was not known when this forecast was made, so conditions could shift it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_CHI_ATL",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "ATL",
+      "away_team": "CHI",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": null,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.487,
+        "away_wp": 0.513,
+        "home_spread": 1.25,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.3842,
+        "away_wp": 0.6158
+      },
+      "final": {
+        "home_wp": 0.4597,
+        "away_wp": 0.5403
+      },
+      "pick": {
+        "team": "CHI",
+        "side": "away",
+        "win_prob": 0.5403
+      },
+      "model_edge_pct": 10.28,
+      "value_team": "CHI",
+      "value_edge_pct": 10.28,
+      "confidence_tier": "COIN FLIP",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.2968,
+          "impact_logit": -0.3355,
+          "favors": "CHI"
+        },
+        {
+          "feature": "net_rush_epa_mismatch",
+          "label": "Net rushing EPA mismatch",
+          "value": 0.4074,
+          "impact_logit": 0.3145,
+          "favors": "ATL"
+        },
+        {
+          "feature": "home_def_rush_epa_pre",
+          "label": "Home run defense EPA allowed",
+          "value": -0.2556,
+          "impact_logit": 0.1834,
+          "favors": "ATL"
+        }
+      ],
+      "imputed_inputs": [
+        "is_outdoor",
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Bears and Falcons are close to a coin flip",
+        "the_pick_summary": "The blended forecast makes the Chicago Bears a 54.0% favorite (COIN FLIP). The model has them at 61.5% against the market's 51.3%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.297 EPA per play in favor of the Chicago Bears), a moderate edge. Next: Net rushing EPA mismatch (0.407 EPA per play in favor of the Atlanta Falcons).",
+        "risk_factor": "At 54.0%, this is close to a coin flip, and one turnover could swing it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_NO_NYG",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "NYG",
+      "away_team": "NO",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.4934,
+        "away_wp": 0.5066,
+        "home_spread": 1.25,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.6217,
+        "away_wp": 0.3783
+      },
+      "final": {
+        "home_wp": 0.5275,
+        "away_wp": 0.4725
+      },
+      "pick": {
+        "team": "NYG",
+        "side": "home",
+        "win_prob": 0.5275
+      },
+      "model_edge_pct": 12.83,
+      "value_team": "NYG",
+      "value_edge_pct": 12.83,
+      "confidence_tier": "COIN FLIP",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.3285,
+          "impact_logit": 0.499,
+          "favors": "NYG"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": -0.0738,
+          "impact_logit": 0.1502,
+          "favors": "NYG"
+        },
+        {
+          "feature": "home_off_rush_epa_pre",
+          "label": "Home offense EPA per rush",
+          "value": -0.2745,
+          "impact_logit": -0.1338,
+          "favors": "NO"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Giants and Saints are close to a coin flip",
+        "the_pick_summary": "The blended forecast makes the New York Giants a 52.7% favorite (COIN FLIP). The model has them at 62.1% against the market's 49.3%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.329 EPA per play in favor of the New York Giants), a strong edge. Next: New Orleans Saints offense EPA per dropback (-0.074 EPA per play), favoring the New York Giants.",
+        "risk_factor": "At 52.7%, this is close to a coin flip, and one turnover could swing it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_NYJ_NE",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "NE",
+      "away_team": "NYJ",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.7453,
+        "away_wp": 0.2547,
+        "home_spread": -7.25,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.7702,
+        "away_wp": 0.2298
+      },
+      "final": {
+        "home_wp": 0.7519,
+        "away_wp": 0.2481
+      },
+      "pick": {
+        "team": "NE",
+        "side": "home",
+        "win_prob": 0.7519
+      },
+      "model_edge_pct": 2.49,
+      "value_team": "NE",
+      "value_edge_pct": 2.49,
+      "confidence_tier": "LOCK",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.3461,
+          "impact_logit": 0.49,
+          "favors": "NE"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": -0.1352,
+          "impact_logit": 0.295,
+          "favors": "NE"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": 0.0389,
+          "impact_logit": 0.2815,
+          "favors": "NE"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Patriots are clear favorites over the Jets",
+        "the_pick_summary": "The blended forecast makes the New England Patriots a 75.1% favorite (LOCK). The model has them at 77.0% against the market's 74.5%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.346 EPA per play in favor of the New England Patriots), a strong edge. Next: New York Jets offense EPA per dropback (-0.135 EPA per play), favoring the New England Patriots.",
+        "risk_factor": "The wind forecast was not known when this forecast was made, so conditions could shift it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_PIT_TB",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "TB",
+      "away_team": "PIT",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 3,
+      "market": {
+        "home_wp": 0.4355,
+        "away_wp": 0.5645,
+        "home_spread": 2.5,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.5569,
+        "away_wp": 0.4431
+      },
+      "final": {
+        "home_wp": 0.4677,
+        "away_wp": 0.5323
+      },
+      "pick": {
+        "team": "PIT",
+        "side": "away",
+        "win_prob": 0.5323
+      },
+      "model_edge_pct": -12.14,
+      "value_team": "TB",
+      "value_edge_pct": 12.14,
+      "confidence_tier": "COIN FLIP",
+      "top_drivers": [
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0175,
+          "impact_logit": -0.2242,
+          "favors": "PIT"
+        },
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.0259,
+          "impact_logit": -0.2166,
+          "favors": "PIT"
+        },
+        {
+          "feature": "home_def_rush_epa_pre",
+          "label": "Home run defense EPA allowed",
+          "value": -0.1661,
+          "impact_logit": 0.1574,
+          "favors": "TB"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Steelers and Buccaneers are close to a coin flip",
+        "the_pick_summary": "The blended forecast makes the Pittsburgh Steelers a 53.2% favorite (COIN FLIP). The model has them at 44.3% against the market's 56.4%.",
+        "key_mismatch": "Early-down success rate gap is the biggest factor (1.8 percentage points in favor of the Pittsburgh Steelers), a moderate edge. Next: Net passing EPA mismatch (0.026 EPA per play in favor of the Pittsburgh Steelers).",
+        "risk_factor": "The model rates the Tampa Bay Buccaneers 12.1 percentage points above the market, so it is less sure of this pick than the line suggests."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_TEN_IND",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T17:00:00Z",
+      "status": "scheduled",
+      "home_team": "IND",
+      "away_team": "TEN",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": null,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.7405,
+        "away_wp": 0.2595,
+        "home_spread": -7.0,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.6492,
+        "away_wp": 0.3508
+      },
+      "final": {
+        "home_wp": 0.7163,
+        "away_wp": 0.2837
+      },
+      "pick": {
+        "team": "IND",
+        "side": "home",
+        "win_prob": 0.7163
+      },
+      "model_edge_pct": -9.13,
+      "value_team": "TEN",
+      "value_edge_pct": 9.13,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.2664,
+          "impact_logit": 0.4173,
+          "favors": "IND"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": -0.1337,
+          "impact_logit": -0.2565,
+          "favors": "TEN"
+        },
+        {
+          "feature": "home_def_rush_epa_pre",
+          "label": "Home run defense EPA allowed",
+          "value": 0.0607,
+          "impact_logit": -0.1999,
+          "favors": "TEN"
+        }
+      ],
+      "imputed_inputs": [
+        "is_outdoor",
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Slight lean to the Colts over the Titans",
+        "the_pick_summary": "The blended forecast makes the Indianapolis Colts a 71.6% favorite (LEAN). The model has them at 64.9% against the market's 74.0%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.266 EPA per play in favor of the Indianapolis Colts), a strong edge. Next: Indianapolis Colts offense EPA per dropback (-0.134 EPA per play), favoring the Tennessee Titans.",
+        "risk_factor": "The model rates the Tennessee Titans 9.1 percentage points above the market, so it is less sure of this pick than the line suggests."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_ARI_LA",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T20:05:00Z",
+      "status": "scheduled",
+      "home_team": "LA",
+      "away_team": "ARI",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": false,
+        "is_high_wind": false,
+        "is_divisional": true
+      },
+      "net_rest_days": -1,
+      "market": {
+        "home_wp": 0.8564,
+        "away_wp": 0.1436,
+        "home_spread": -12.5,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.7433,
+        "away_wp": 0.2567
+      },
+      "final": {
+        "home_wp": 0.8263,
+        "away_wp": 0.1737
+      },
+      "pick": {
+        "team": "LA",
+        "side": "home",
+        "win_prob": 0.8263
+      },
+      "model_edge_pct": -11.31,
+      "value_team": "ARI",
+      "value_edge_pct": 11.31,
+      "confidence_tier": "LOCK",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.4165,
+          "impact_logit": 0.4825,
+          "favors": "LA"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": 0.0288,
+          "impact_logit": 0.1732,
+          "favors": "LA"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": 0.0063,
+          "impact_logit": 0.1373,
+          "favors": "LA"
+        }
+      ],
+      "imputed_inputs": [],
+      "result": null,
+      "report": {
+        "headline": "Rams are clear favorites over the Cardinals",
+        "the_pick_summary": "The blended forecast makes the Los Angeles Rams an 82.6% favorite (LOCK). The model has them at 74.3% against the market's 85.6%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.416 EPA per play in favor of the Los Angeles Rams), a strong edge. Next: Early-down success rate gap (2.9 percentage points in favor of the Los Angeles Rams).",
+        "risk_factor": "The model rates the Arizona Cardinals 11.3 percentage points above the market, so it is less sure of this pick than the line suggests."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_BUF_LV",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T20:25:00Z",
+      "status": "scheduled",
+      "home_team": "LV",
+      "away_team": "BUF",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": false,
+        "is_high_wind": false,
+        "is_divisional": false
+      },
+      "net_rest_days": 1,
+      "market": {
+        "home_wp": 0.3226,
+        "away_wp": 0.6774,
+        "home_spread": 5.0,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.4561,
+        "away_wp": 0.5439
+      },
+      "final": {
+        "home_wp": 0.3581,
+        "away_wp": 0.6419
+      },
+      "pick": {
+        "team": "BUF",
+        "side": "away",
+        "win_prob": 0.6419
+      },
+      "model_edge_pct": -13.35,
+      "value_team": "LV",
+      "value_edge_pct": 13.35,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.1517,
+          "impact_logit": -0.2693,
+          "favors": "BUF"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0503,
+          "impact_logit": -0.1909,
+          "favors": "BUF"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.1825,
+          "impact_logit": 0.1815,
+          "favors": "LV"
+        }
+      ],
+      "imputed_inputs": [],
+      "result": null,
+      "report": {
+        "headline": "Slight lean to the Bills over the Raiders",
+        "the_pick_summary": "The blended forecast makes the Buffalo Bills a 64.1% favorite (LEAN). The model has them at 54.3% against the market's 67.7%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.152 EPA per play in favor of the Buffalo Bills), a moderate edge. Next: Early-down success rate gap (5.0 percentage points in favor of the Buffalo Bills).",
+        "risk_factor": "The model rates the Las Vegas Raiders 13.3 percentage points above the market, so it is less sure of this pick than the line suggests."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_LAC_KC",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-18T20:25:00Z",
+      "status": "scheduled",
+      "home_team": "KC",
+      "away_team": "LAC",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 7,
+      "market": {
+        "home_wp": 0.7826,
+        "away_wp": 0.2174,
+        "home_spread": -8.0,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.8546,
+        "away_wp": 0.1454
+      },
+      "final": {
+        "home_wp": 0.8017,
+        "away_wp": 0.1983
+      },
+      "pick": {
+        "team": "KC",
+        "side": "home",
+        "win_prob": 0.8017
+      },
+      "model_edge_pct": 7.2,
+      "value_team": "KC",
+      "value_edge_pct": 7.2,
+      "confidence_tier": "LOCK",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.2772,
+          "impact_logit": 0.3789,
+          "favors": "KC"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": 0.1108,
+          "impact_logit": 0.3587,
+          "favors": "KC"
+        },
+        {
+          "feature": "net_rush_epa_mismatch",
+          "label": "Net rushing EPA mismatch",
+          "value": 0.4432,
+          "impact_logit": 0.3495,
+          "favors": "KC"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "Chiefs are clear favorites over the Chargers",
+        "the_pick_summary": "The blended forecast makes the Kansas City Chiefs an 80.1% favorite (LOCK). The model has them at 85.4% against the market's 78.2%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.277 EPA per play in favor of the Kansas City Chiefs), a moderate edge. Next: Early-down success rate gap (11.1 percentage points in favor of the Kansas City Chiefs).",
+        "risk_factor": "The wind forecast was not known when this forecast was made, so conditions could shift it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_DAL_GB",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-19T00:20:00Z",
+      "status": "scheduled",
+      "home_team": "GB",
+      "away_team": "DAL",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": -3,
+      "market": {
+        "home_wp": 0.5131,
+        "away_wp": 0.4869,
+        "home_spread": -1.5,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.6711,
+        "away_wp": 0.3289
+      },
+      "final": {
+        "home_wp": 0.5551,
+        "away_wp": 0.4449
+      },
+      "pick": {
+        "team": "GB",
+        "side": "home",
+        "win_prob": 0.5551
+      },
+      "model_edge_pct": 15.8,
+      "value_team": "GB",
+      "value_edge_pct": 15.8,
+      "confidence_tier": "STAT MISMATCH",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.4009,
+          "impact_logit": 0.4411,
+          "favors": "GB"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0482,
+          "impact_logit": -0.2108,
+          "favors": "DAL"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.177,
+          "impact_logit": 0.1601,
+          "favors": "GB"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "The numbers and the line split on the Packers and the Cowboys",
+        "the_pick_summary": "The blended forecast makes the Green Bay Packers a 55.5% favorite (STAT MISMATCH). The model has them at 67.1% against the market's 51.3%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.401 EPA per play in favor of the Green Bay Packers), a strong edge. Next: Early-down success rate gap (4.8 percentage points in favor of the Dallas Cowboys).",
+        "risk_factor": "The model rates the Green Bay Packers 15.8 percentage points above the market, and a gap that large often means the line knows something the play-by-play numbers miss."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    },
+    {
+      "game_id": "2026_06_WAS_SF",
+      "season": 2026,
+      "week": 6,
+      "game_type": "REG",
+      "kickoff_utc": "2026-10-20T00:15:00Z",
+      "status": "scheduled",
+      "home_team": "SF",
+      "away_team": "WAS",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.7748,
+        "away_wp": 0.2252,
+        "home_spread": -7.5,
+        "source": "odds_api_snapshot",
+        "method": "h2h",
+        "books": 6,
+        "as_of": "2026-10-16T18:03:46Z"
+      },
+      "model": {
+        "home_wp": 0.8202,
+        "away_wp": 0.1798
+      },
+      "final": {
+        "home_wp": 0.7869,
+        "away_wp": 0.2131
+      },
+      "pick": {
+        "team": "SF",
+        "side": "home",
+        "win_prob": 0.7869
+      },
+      "model_edge_pct": 4.54,
+      "value_team": "SF",
+      "value_edge_pct": 4.54,
+      "confidence_tier": "LOCK",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.469,
+          "impact_logit": 0.4774,
+          "favors": "SF"
+        },
+        {
+          "feature": "home_off_early_down_sr_pre",
+          "label": "Home early-down success rate",
+          "value": 0.5311,
+          "impact_logit": 0.3345,
+          "favors": "SF"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": 0.1424,
+          "impact_logit": 0.3236,
+          "favors": "SF"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null,
+      "report": {
+        "headline": "49ers are clear favorites over the Commanders",
+        "the_pick_summary": "The blended forecast makes the San Francisco 49ers a 78.6% favorite (LOCK). The model has them at 82.0% against the market's 77.4%.",
+        "key_mismatch": "Net passing EPA mismatch is the biggest factor (0.469 EPA per play in favor of the San Francisco 49ers), a strong edge. Next: San Francisco 49ers early-down success rate (53.1%), favoring the San Francisco 49ers.",
+        "risk_factor": "The wind forecast was not known when this forecast was made, so conditions could shift it."
+      },
+      "report_meta": {
+        "generator": "template",
+        "attempts": 0,
+        "fallback_reason": null,
+        "validation_errors": []
+      }
+    }
+  ]
+}
