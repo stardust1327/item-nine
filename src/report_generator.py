@@ -33,11 +33,12 @@ import random
 import re
 import sys
 import time
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final, Literal, Protocol
 
@@ -59,23 +60,30 @@ PROVIDER: Final[str] = "google-genai"
 TEMPLATE_GENERATOR: Final[str] = "template"
 NEWSLETTER_NAME: Final[str] = "week_{week:02d}_report.md"
 TIER_ORDER: Final[tuple[str, ...]] = M.TIERS  # LOCK, VALUE EDGE, LEAN, COIN FLIP
-PERCENT_TOLERANCE: Final[float] = 0.55  # a quoted percentage may round a fact-sheet value to the nearest integer
-BANNED_PHRASES: Final[tuple[str, ...]] = (
-    "guarantee",
-    "sure thing",
-    "can't lose",
-    "cannot lose",
-    "can not lose",
-    "free money",
-    "lock of the",
-    "mortal lock",
-    "bet the house",
-    "bet your",
-    "max bet",
-    "hammer the",
+ALWAYS_ALLOWED_PERCENTAGES: Final[frozenset[float]] = frozenset({50.0})  # "a 50/50 game", "50% coin flip"
+# Hype and betting calls, matched on normalised text (NFKC, ASCII quotes and dashes, no zero-width characters).
+BANNED_PATTERNS: Final[tuple[str, ...]] = (
+    r"(?<!no )(?<!not )(?<!nothing is )(?<!isn't )(?<!never )guarantee",
+    r"sure[ -]thing",
+    r"can'?t lose|cannot lose|can not lose|can'?t[ -]miss",
+    r"free money",
+    r"lock of the",
+    r"mortal lock",
+    r"slam[ -]dunk",
+    r"bet the house|bet your|max bet|best bet|bet on|place a bet|\bwager",
+    r"\bparlay",
+    r"hammer the",
+    r"against the spread|\bATS\b",
 )
-_PERCENT_RE: Final = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b|percentage[- ]points?\b|pct\b)", re.IGNORECASE)
-_HTML_RE: Final = re.compile(r"<\s*/?\s*[a-zA-Z]")
+_BANNED_RE: Final = re.compile("|".join(f"(?:{p})" for p in BANNED_PATTERNS), re.IGNORECASE)
+_PERCENT_RE: Final = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:%|percent\b|per cent\b|percentage[- ]points?\b|pct\b)", re.IGNORECASE
+)
+# Anything that is markup rather than prose: HTML tags/comments, code, links, images, URLs, emphasis, list starts.
+_MARKUP_RE: Final = re.compile(
+    r"<\s*[!/a-zA-Z]|```|~~|`|\]\(|!\[|https?://|\bwww\.|\*|__|^\s*(?:#|>|[-+]\s|\d+[.)]\s|\|)",
+)
+_TIER_TOKEN_RE: Final = re.compile(r"\b(LOCK|VALUE EDGE|LEAN|COIN FLIP)\b")
 
 Mode = Literal["llm", "template"]
 
@@ -92,8 +100,23 @@ class LLMAuthError(ReportError):
     """The Gemini API rejected the key or project; retrying will not help."""
 
 
+class LLMConfigError(ReportError):
+    """A request error that every game would hit (unknown model, unsupported location, bad request).
+
+    The run is aborted rather than falling back game by game.
+    """
+
+
+class LLMQuotaError(ReportError):
+    """The daily request quota is exhausted; retrying today will not help."""
+
+
 class LLMRequestError(ReportError):
-    """A Gemini request failed (network, quota, server, empty or blocked response)."""
+    """A Gemini request failed for this game (network, rate limit, server error)."""
+
+
+class LLMEmptyResponseError(LLMRequestError):
+    """Gemini returned no text (empty or blocked candidate). Counts as one failed attempt."""
 
 
 class ContractCError(ValueError):
@@ -121,8 +144,35 @@ def team_nickname(abbr: str) -> str:
     return team_name(abbr).split()[-1] if abbr in TEAM_NAMES else abbr
 
 
+_EXTRA_NICKNAMES: Final[dict[str, tuple[str, ...]]] = {"SF": ("Niners",), "NYG": ("G-Men",), "TB": ("Bucs",)}
+
+
+def team_city(abbr: str) -> str | None:
+    """Market name ('Kansas City', 'Green Bay'), or None when two franchises share it (Los Angeles, New York)."""
+    if abbr not in TEAM_NAMES:
+        return None
+    city = team_name(abbr).rsplit(" ", 1)[0]
+    shared = sum(1 for other in TEAM_NAMES if team_name(other).rsplit(" ", 1)[0] == city)
+    return city if shared == 1 else None
+
+
 def team_aliases(abbr: str) -> tuple[str, ...]:
-    return tuple(dict.fromkeys((abbr, team_name(abbr), team_nickname(abbr))))
+    """Ways prose may name a team: abbreviation, full name, nickname, unambiguous city, common nicknames."""
+    city = team_city(abbr)
+    names = (abbr, team_name(abbr), team_nickname(abbr), *([city] if city else []), *_EXTRA_NICKNAMES.get(abbr, ()))
+    return tuple(dict.fromkeys(names))
+
+
+def normalize_text(text: str) -> str:
+    """NFKC, ASCII quotes/dashes, no zero-width or other format characters, single spaces."""
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    text = text.translate(
+        str.maketrans(
+            {"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-", "\u2212": "-"}
+        )
+    )
+    return re.sub(r"[ \t\u00a0]{2,}|\u00a0", " ", text).strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -136,16 +186,40 @@ class GameFacts:
     sheet: dict[str, Any]  # sent to the LLM as JSON
     pick_abbr: str
     other_abbr: str
+    tier: str
+    pick_pct: float  # final win probability of the pick, as displayed
     allowed_percentages: frozenset[float]
     team_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    foreign_team_names: tuple[str, ...] = ()  # full names and nicknames of teams not in this game
 
     @property
     def pick_aliases(self) -> tuple[str, ...]:
         return self.team_aliases[self.pick_abbr]
 
+    @property
+    def game_aliases(self) -> tuple[str, ...]:
+        return self.team_aliases[self.pick_abbr] + self.team_aliases[self.other_abbr]
+
 
 def _pct(p: float) -> float:
     return round(100.0 * p, 1)
+
+
+def pct_down(p: float) -> float:
+    """Probability as a percentage, truncated to 1 decimal so a displayed value never reaches a tier
+    threshold the unrounded value missed (74.96% shows as 74.9%, not 75.0%)."""
+    return math.floor(round(1000.0 * p, 6)) / 10.0
+
+
+def edge_down(edge_pct: float) -> float:
+    """Edge in percentage points truncated toward zero to 1 decimal (4.95 shows as 4.9, not 5.0)."""
+    return math.trunc(round(10.0 * edge_pct, 6)) / 10.0
+
+
+def _pair_pct(pick_side_wp: float) -> tuple[float, float]:
+    """(pick side, other side) percentages that add up to exactly 100."""
+    pick = pct_down(pick_side_wp)
+    return pick, round(100.0 - pick, 1)
 
 
 def _strength(impact_logit: float) -> str:
@@ -189,7 +263,7 @@ def describe_driver(feature: str, value: float, home: str, away: str) -> tuple[s
             if metric == "off_early_down_sr":
                 return stat, f"{_pct(value):.1f}%"
             if metric == "qb_cpoe":
-                return stat, f"{value:+.1f} points"
+                return stat, f"{value:+.1f} percentage points"
             return stat, f"{value:+.3f} EPA per play"
     stat = _MATCHUP_TEXT.get(feature, feature)
     ahead = team_name(home if value > 0 else away)
@@ -204,7 +278,7 @@ def describe_driver(feature: str, value: float, home: str, away: str) -> tuple[s
     if feature == "diff_early_down_sr":
         return stat, f"{abs(_pct(value)):.1f} percentage points in favor of the {ahead}"
     if feature == "diff_qb_cpoe":
-        return stat, f"{abs(value):.1f} CPOE points in favor of the {ahead}"
+        return stat, f"{abs(value):.1f} percentage points of CPOE in favor of the {ahead}"
     return stat, f"{abs(value):.3f} EPA per play in favor of the {ahead}"
 
 
@@ -232,6 +306,7 @@ def game_facts(game: dict[str, Any], payload: dict[str, Any]) -> GameFacts:
     def flag(value: bool | None, unknown: str = "unknown before kickoff") -> str:
         return unknown if value is None else ("yes" if value else "no")
 
+    final_pick, final_other = _pair_pct(game["pick"]["win_prob"])
     rest = game["net_rest_days"]
     if rest is None or rest == 0:
         rest_text = "even rest"
@@ -255,18 +330,15 @@ def game_facts(game: dict[str, Any], payload: dict[str, Any]) -> GameFacts:
         "pick": {
             "team": team_name(pick),
             "abbr": pick,
-            "final_win_probability_pct": _pct(game["pick"]["win_prob"]),
-            "opponent_win_probability_pct": _pct(1.0 - game["pick"]["win_prob"]),
+            "final_win_probability_pct": final_pick,
+            "opponent_win_probability_pct": final_other,
         },
         "confidence_tier": game["confidence_tier"],
         "tier_meaning": payload["tier_rules"][game["confidence_tier"]],
-        "model_win_probability_pct": {
-            pick: _pct(game["model"][f"{side}_wp"]),
-            other: _pct(1.0 - game["model"][f"{side}_wp"]),
-        },
+        "model_win_probability_pct": dict(zip((pick, other), _pair_pct(game["model"][f"{side}_wp"]), strict=True)),
         "market": (
             {
-                "win_probability_pct": {pick: _pct(market[f"{side}_wp"]), other: _pct(1.0 - market[f"{side}_wp"])},
+                "win_probability_pct": dict(zip((pick, other), _pair_pct(market[f"{side}_wp"]), strict=True)),
                 "home_spread": market["home_spread"],
                 "source": _SOURCE_TEXT.get(market["source"], market["source"]),
             }
@@ -299,8 +371,17 @@ def game_facts(game: dict[str, Any], payload: dict[str, Any]) -> GameFacts:
         sheet=sheet,
         pick_abbr=pick,
         other_abbr=other,
-        allowed_percentages=frozenset(_collect_percentages(sheet)),
+        tier=game["confidence_tier"],
+        pick_pct=final_pick,
+        allowed_percentages=frozenset(_collect_percentages(sheet) | ALWAYS_ALLOWED_PERCENTAGES),
         team_aliases={home: team_aliases(home), away: team_aliases(away)},
+        foreign_team_names=tuple(
+            name
+            for abbr in TEAM_NAMES
+            if abbr not in (home, away)
+            for name in dict.fromkeys((team_name(abbr), team_nickname(abbr), *_EXTRA_NICKNAMES.get(abbr, ())))
+            if name not in team_aliases(home) + team_aliases(away)
+        ),
     )
 
 
@@ -326,9 +407,15 @@ def _collect_percentages(node: Any, key: str = "") -> set[float]:
 class ScoutingReport(BaseModel):
     """Validated scouting report for one game.
 
-    Format checks always run. Grounding checks run when validated with
-    ``context={"facts": GameFacts}``: allowed percentages, pick named,
-    no hype or betting language, no HTML.
+    Format checks always run: lengths, a single paragraph, plain prose with no
+    markup, links or code. Text is Unicode-normalised first. Grounding checks
+    run when validated with ``context={"facts": GameFacts}``:
+
+    * the_pick_summary names the pick and states its tier and final win probability;
+    * no other tier is named, and no team outside this game is mentioned;
+    * the headline names one of the two teams;
+    * every percentage matches a fact-sheet value (1 decimal, or rounded to a whole number);
+    * no hype or betting language.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
@@ -355,24 +442,25 @@ class ScoutingReport(BaseModel):
         description="1-2 sentences on the main reason the pick could be wrong.",
     )
 
+    @field_validator("headline", "the_pick_summary", "key_mismatch", "risk_factor", mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Any:
+        return normalize_text(value) if isinstance(value, str) else value
+
     @field_validator("headline", "the_pick_summary", "key_mismatch", "risk_factor")
     @classmethod
-    def _single_paragraph(cls, value: str) -> str:
+    def _plain_prose(cls, value: str) -> str:
         if "\n" in value or "\r" in value:
             raise ValueError("must be a single paragraph (no line breaks)")
-        if value.lstrip().startswith(("#", ">", "-", "*", "|")):
-            raise ValueError("must be plain prose, not markdown")
-        if _HTML_RE.search(value):
-            raise ValueError("must not contain HTML")
-        return re.sub(r"\s{2,}", " ", value)
+        if _MARKUP_RE.search(value):
+            raise ValueError("must be plain prose: no markdown, HTML, code, links, URLs or list markers")
+        return value
 
     @field_validator("headline")
     @classmethod
     def _headline_style(cls, value: str) -> str:
         if value.endswith("."):
             raise ValueError("headline must not end with a period")
-        if "**" in value or "__" in value:
-            raise ValueError("headline must not use markdown emphasis")
         return value
 
     @model_validator(mode="after")
@@ -380,25 +468,54 @@ class ScoutingReport(BaseModel):
         facts = (info.context or {}).get("facts") if isinstance(info.context, dict) else None
         if facts is None:
             return self
-        text = " ".join((self.headline, self.the_pick_summary, self.key_mismatch, self.risk_factor))
-        lowered = text.lower()
-        banned = [phrase for phrase in BANNED_PHRASES if phrase in lowered]
+        fields = {
+            "headline": self.headline,
+            "the_pick_summary": self.the_pick_summary,
+            "key_mismatch": self.key_mismatch,
+            "risk_factor": self.risk_factor,
+        }
+        text = " ".join(fields.values())
+        problems: list[str] = []
+
+        banned = sorted({m.group(0) for m in _BANNED_RE.finditer(text)})
         if banned:
-            raise ValueError(f"hype or betting language is not allowed: {banned}")
+            problems.append(f"hype or betting language is not allowed: {banned}")
         if not any(_mentions(self.the_pick_summary, alias) for alias in facts.pick_aliases):
-            raise ValueError(f"the_pick_summary must name the pick ({' / '.join(facts.pick_aliases)})")
+            problems.append(f"the_pick_summary must name the pick ({' / '.join(facts.pick_aliases)})")
+        if not any(_mentions(self.headline, alias) for alias in facts.game_aliases):
+            problems.append("headline must name one of the two teams in this game")
+        if not re.search(rf"\b{re.escape(facts.tier)}\b", self.the_pick_summary, re.IGNORECASE):
+            problems.append(f"the_pick_summary must state the confidence tier ({facts.tier})")
+        wrong_tiers = sorted({t for t in _TIER_TOKEN_RE.findall(text) if t != facts.tier})
+        if wrong_tiers:
+            problems.append(f"the tier for this game is {facts.tier}, not {wrong_tiers}")
+        quoted = [float(m) for m in _PERCENT_RE.findall(self.the_pick_summary)]
+        if not any(_percent_matches(v, facts.pick_pct) for v in quoted):
+            problems.append(f"the_pick_summary must give the pick's final win probability ({facts.pick_pct:g}%)")
+        quoted_all = {float(m) for m in _PERCENT_RE.findall(text)}
         unsupported = sorted(
-            {
-                float(m)
-                for m in _PERCENT_RE.findall(text)
-                if not any(abs(float(m) - a) <= PERCENT_TOLERANCE for a in facts.allowed_percentages)
-            }
+            v for v in quoted_all if not any(_percent_matches(v, a) for a in facts.allowed_percentages)
         )
         if unsupported:
-            raise ValueError(
+            problems.append(
                 f"percentages not in the fact sheet: {unsupported} (allowed: {sorted(facts.allowed_percentages)})"
             )
+        foreign = sorted({name for name in facts.foreign_team_names if _mentions_name(text, name)})
+        if foreign:
+            problems.append(f"mentions teams that are not in this game: {foreign}")
+        if problems:
+            raise ValueError("; ".join(problems))
         return self
+
+
+def _percent_matches(value: float, fact: float) -> bool:
+    """A quoted percentage matches a fact if it equals it at 1-decimal precision or is its whole-number rounding."""
+    return abs(value - fact) <= 0.051 or (value.is_integer() and value == math.floor(fact + 0.5))
+
+
+def _mentions_name(text: str, name: str) -> bool:
+    """Case-sensitive whole-word match, so lowercase words ('bills', 'giants') do not count as teams."""
+    return re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", text) is not None
 
 
 def _mentions(text: str, alias: str) -> bool:
@@ -484,7 +601,67 @@ class ReportWriter(Protocol):
         ...
 
 
-_AUTH_HINTS: Final[tuple[str, ...]] = ("api key not valid", "api_key_invalid", "permission", "unauthenticated")
+# Machine-readable google.rpc.ErrorInfo reasons and message hints that mean "this key/project cannot call Gemini".
+_AUTH_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "API_KEY_INVALID",
+        "API_KEY_EXPIRED",
+        "API_KEY_SERVICE_BLOCKED",
+        "API_KEY_HTTP_REFERRER_BLOCKED",
+        "API_KEY_IP_ADDRESS_BLOCKED",
+        "API_KEY_ANDROID_APP_BLOCKED",
+        "API_KEY_IOS_APP_BLOCKED",
+        "SERVICE_DISABLED",
+        "CONSUMER_INVALID",
+        "ACCESS_TOKEN_EXPIRED",
+    }
+)
+_AUTH_HINTS: Final[tuple[str, ...]] = (
+    "api key not valid",
+    "api key expired",
+    "api key was reported as leaked",
+    "permission denied",
+    "unauthenticated",
+)
+
+
+def _error_details(exc: Any) -> list[dict[str, Any]]:
+    details = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return []
+    items = (details.get("error") or {}).get("details") or []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def classify_api_error(exc: Any) -> type[ReportError] | None:
+    """Exception class to raise for a google.genai APIError, or None if it is worth retrying.
+
+    Fatal for the whole run: auth problems (401/403, ErrorInfo API_KEY_*, ...), daily
+    quota exhaustion, unknown models (404), and other 400s (unsupported location,
+    request-shape problems). These would be the same for every game. Retried:
+    per-minute rate limits (429) and server errors (5xx).
+    """
+    code, status = getattr(exc, "code", None), (getattr(exc, "status", None) or "")
+    message = (getattr(exc, "message", None) or str(exc)).lower()
+    details = _error_details(exc)
+    reasons = {str(d.get("reason", "")) for d in details}
+    if (
+        code in (401, 403)
+        or status in ("UNAUTHENTICATED", "PERMISSION_DENIED")
+        or reasons & _AUTH_REASONS
+        or any(h in message for h in _AUTH_HINTS)
+    ):
+        return LLMAuthError
+    if code == 429:
+        quota_ids = [
+            str(v.get("quotaId", "")) for d in details for v in (d.get("violations") or []) if isinstance(v, dict)
+        ]
+        return LLMQuotaError if any("perday" in q.replace("_", "").lower() for q in quota_ids) else None
+    if code is not None and code >= 500:
+        return None
+    if code in (400, 404):
+        return LLMConfigError
+    return LLMRequestError
 
 
 class GeminiReportWriter:
@@ -536,12 +713,12 @@ class GeminiReportWriter:
             try:
                 response = self._client.models.generate_content(model=self.name, contents=prompt, config=config)
             except errors.APIError as exc:
-                message = (exc.message or str(exc)).lower()
-                if exc.code in (401, 403) or (exc.code == 400 and any(h in message for h in _AUTH_HINTS)):
-                    raise LLMAuthError(f"Gemini rejected the request (HTTP {exc.code}): {exc.message}") from None
-                retryable = exc.code == 429 or (exc.code is not None and exc.code >= 500)
-                if not retryable or attempt > self.max_retries:
-                    raise LLMRequestError(f"Gemini request failed (HTTP {exc.code}): {exc.message}") from None
+                detail = f"HTTP {exc.code} {exc.status or ''}: {exc.message}".replace("  ", " ")
+                error_class = classify_api_error(exc)
+                if error_class is not None:
+                    raise error_class(f"Gemini rejected the request ({detail})") from None
+                if attempt > self.max_retries:
+                    raise LLMRequestError(f"Gemini request failed after {attempt} attempts ({detail})") from None
                 delay = _retry_delay(exc, attempt)
                 logger.warning("Gemini HTTP %s (%s); retrying in %.1fs", exc.code, exc.status, delay)
                 time.sleep(delay)
@@ -555,7 +732,10 @@ class GeminiReportWriter:
                 continue
             text = _response_text(response)
             if not text:
-                raise LLMRequestError(f"Gemini returned no text (finish reason: {_finish_reason(response)})")
+                raise LLMEmptyResponseError(
+                    f"Gemini returned no text (finish reason: {_finish_reason(response)}, "
+                    f"block reason: {_block_reason(response)})"
+                )
             return text
         raise AssertionError("unreachable")  # pragma: no cover
 
@@ -580,6 +760,13 @@ def _response_text(response: Any) -> str | None:
         return response.text
     except (ValueError, AttributeError):  # blocked or empty candidates
         return None
+
+
+def _block_reason(response: Any) -> str:
+    try:
+        return str(response.prompt_feedback.block_reason or "none")
+    except AttributeError:
+        return "none"
 
 
 def _finish_reason(response: Any) -> str:
@@ -701,9 +888,12 @@ def generate_report(
     for attempt in range(1, max_attempts + 1):
         try:
             raw = writer.complete(SYSTEM_INSTRUCTION, build_prompt(facts, feedback=feedback, previous=previous))
-        except LLMAuthError:
-            raise
-        except LLMRequestError as exc:
+        except LLMEmptyResponseError as exc:  # a failed attempt; ask again (nothing to repair)
+            history.append(f"attempt {attempt}: {exc}")
+            reason = f"empty or blocked reply after {attempt} attempt(s)"
+            feedback, previous = [], None
+            continue
+        except LLMRequestError as exc:  # this game only (network, rate limit, server); fatal errors propagate
             reason = str(exc)
             break
         try:
@@ -796,8 +986,9 @@ def enrich_payload(
 
 
 def contract_b_view(payload: dict[str, Any]) -> dict[str, Any]:
-    """The Contract B payload embedded in a Contract C payload."""
-    source = payload.get("source") or {}
+    """The Contract B payload embedded in a Contract C payload (non-list ``games`` pass through for validation)."""
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    games = payload.get("games")
     return {
         "contract": source.get("contract"),
         "schema_version": source.get("schema_version"),
@@ -806,10 +997,14 @@ def contract_b_view(payload: dict[str, Any]) -> dict[str, Any]:
         "week": payload.get("week"),
         "model": payload.get("model"),
         "tier_rules": payload.get("tier_rules"),
-        "games": [
-            {k: v for k, v in g.items() if k not in ("report", "report_meta")} if isinstance(g, dict) else g
-            for g in payload.get("games") or []
-        ],
+        "games": (
+            [
+                {k: v for k, v in g.items() if k not in ("report", "report_meta")} if isinstance(g, dict) else g
+                for g in games
+            ]
+            if isinstance(games, list)
+            else games
+        ),
     }
 
 
@@ -818,6 +1013,8 @@ def validate_contract_c(payload: Any) -> None:
 
     The embedded Contract B must validate, and every report must re-validate
     against the fact sheet rebuilt from its own game, including grounding.
+    Every key consumers index (``report``, ``report_meta``, ``generator``,
+    ``summary``) is checked for presence and type.
     """
     if not isinstance(payload, dict):
         raise ContractCError("Contract C violations:\n  - payload must be a JSON object")
@@ -830,6 +1027,10 @@ def validate_contract_c(payload: Any) -> None:
         raise ContractCError("Contract C violations:\n  - " + "\n  - ".join(problems))
 
 
+_REPORT_META_KEYS: Final[frozenset[str]] = frozenset({"generator", "attempts", "fallback_reason", "validation_errors"})
+_GENERATOR_KEYS: Final[frozenset[str]] = frozenset({"provider", "model", "mode", "temperature", "max_attempts"})
+
+
 def _check_contract_c(payload: dict[str, Any], problems: list[str]) -> None:
     if payload.get("contract") != CONTRACT_NAME:
         problems.append(f"contract must be {CONTRACT_NAME!r}")
@@ -837,6 +1038,9 @@ def _check_contract_c(payload: dict[str, Any], problems: list[str]) -> None:
         problems.append("schema_version must be a string")
     if M._parse_iso(payload.get("generated_at")) is None:
         problems.append("generated_at must be ISO-8601")
+    source = payload.get("source")
+    if not isinstance(source, dict) or source.get("contract") != M.CONTRACT_NAME:
+        problems.append(f"source must describe the Contract {M.CONTRACT_NAME} payload it was built from")
     view = contract_b_view(payload)
     try:
         M.validate_contract_b(view)
@@ -845,22 +1049,46 @@ def _check_contract_c(payload: dict[str, Any], problems: list[str]) -> None:
         return
 
     generator = payload.get("generator")
-    if not isinstance(generator, dict) or generator.get("mode") not in ("llm", "template"):
-        problems.append("generator.mode must be 'llm' or 'template'")
+    if (
+        not isinstance(generator, dict)
+        or set(generator) != _GENERATOR_KEYS
+        or generator.get("mode") not in ("llm", "template")
+    ):
+        problems.append(f"generator must have keys {sorted(_GENERATOR_KEYS)} and mode 'llm' or 'template'")
         return
-    allowed_generators = {TEMPLATE_GENERATOR} | ({generator.get("model")} if generator["mode"] == "llm" else set())
+    if generator["mode"] == "llm":
+        if not (isinstance(generator["model"], str) and generator["model"]) or generator["provider"] != PROVIDER:
+            problems.append(f"llm mode needs generator.provider {PROVIDER!r} and a model name")
+            return
+        allowed_generators = {TEMPLATE_GENERATOR, generator["model"]}
+    else:
+        allowed_generators = {TEMPLATE_GENERATOR}
     counts: Counter[str] = Counter()
     for n, game in enumerate(payload["games"]):
         where = f"games[{n}] ({game.get('game_id')})"
-        meta = game.get("report_meta")
-        if not isinstance(meta, dict) or meta.get("generator") not in allowed_generators:
-            problems.append(f"{where}: report_meta.generator must be one of {sorted(map(str, allowed_generators))}")
+        meta, report = game.get("report_meta"), game.get("report")
+        meta_ok = (
+            isinstance(meta, dict)
+            and set(meta) == _REPORT_META_KEYS
+            and meta["generator"] in allowed_generators
+            and M._is_int(meta["attempts"])
+            and meta["attempts"] >= 0
+            and (meta["fallback_reason"] is None or isinstance(meta["fallback_reason"], str))
+            and isinstance(meta["validation_errors"], list)
+            and all(isinstance(e, str) for e in meta["validation_errors"])
+        )
+        if not meta_ok:
+            problems.append(
+                f"{where}: report_meta must hold {sorted(_REPORT_META_KEYS)} "
+                f"with a generator in {sorted(allowed_generators)}"
+            )
             continue
-        if not M._is_int(meta.get("attempts")) or meta["attempts"] < 0:
-            problems.append(f"{where}: report_meta.attempts must be a non-negative int")
         counts[meta["generator"]] += 1
+        if not isinstance(report, dict):
+            problems.append(f"{where}: report must be an object")
+            continue
         try:
-            validate_report(game.get("report"), game_facts(game, view))
+            validate_report(report, game_facts(game, view))
         except ValidationError as exc:
             problems.append(f"{where}: report invalid: {'; '.join(_format_errors(exc))}")
 
@@ -870,9 +1098,10 @@ def _check_contract_c(payload: dict[str, Any], problems: list[str]) -> None:
         "n_games": n_games,
         "n_template": counts[TEMPLATE_GENERATOR],
         "n_llm": n_games - counts[TEMPLATE_GENERATOR],
+        "tiers": {tier: sum(g["confidence_tier"] == tier for g in payload["games"]) for tier in TIER_ORDER},
     }
     if not isinstance(summary, dict) or any(summary.get(k) != v for k, v in expected.items()):
-        problems.append(f"summary counts must be {expected}")
+        problems.append(f"summary must be {expected}")
     path = payload.get("newsletter_path")
     if path is not None and not isinstance(path, str):
         problems.append("newsletter_path must be a string or null")
@@ -881,6 +1110,21 @@ def _check_contract_c(payload: dict[str, Any], problems: list[str]) -> None:
 # --------------------------------------------------------------------------- #
 # Markdown newsletter
 # --------------------------------------------------------------------------- #
+_ROUND_NAMES: Final[dict[str, str]] = {
+    "WC": "Wild Card Round",
+    "DIV": "Divisional Round",
+    "CON": "Conference Championships",
+    "SB": "Super Bowl",
+}
+_MD_SPECIAL_RE: Final = re.compile(r"([\\`*_\[\]<>~|#])")
+
+
+def md_text(text: str) -> str:
+    """Escape Markdown/HTML metacharacters in prose before it goes into the newsletter (defence in depth)."""
+    escaped = _MD_SPECIAL_RE.sub(r"\\\1", text)
+    return re.sub(r"^(\s*\d+)([.)])", r"\1\\\2", escaped)
+
+
 def _local_kickoff(iso: str) -> str:
     kickoff = M._parse_iso(iso)
     if kickoff is None:
@@ -894,9 +1138,13 @@ def _local_kickoff(iso: str) -> str:
     return local.strftime("%a %b %d, %I:%M %p ET").replace(" 0", " ")
 
 
+def _pct_text(p: float) -> str:
+    return f"{pct_down(p):.1f}%"
+
+
 def _edge_text(game: dict[str, Any]) -> str:
     edge = game["model_edge_pct"]
-    return "n/a" if edge is None else f"{edge:+.1f} pts"
+    return "n/a" if edge is None else f"{edge_down(edge):+.1f} pts"
 
 
 def _result_text(game: dict[str, Any]) -> str:
@@ -914,19 +1162,53 @@ def _md_cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
+def _title(contract_c: dict[str, Any]) -> str:
+    types = {g["game_type"] for g in contract_c["games"]}
+    label = _ROUND_NAMES[next(iter(types))] if len(types) == 1 and next(iter(types)) in _ROUND_NAMES else None
+    week = label or f"Week {contract_c['week']}"
+    return f"# NFL {week} Scouting Report — {contract_c['season']} Season"
+
+
+def _writer_label(contract_c: dict[str, Any]) -> str:
+    gen, summary = contract_c["generator"], contract_c["summary"]
+    if gen["mode"] == "template" or summary["n_llm"] == 0:
+        return "rule-based templates" + (" (Gemini unavailable)" if gen["mode"] == "llm" else "")
+    if summary["n_template"]:
+        return f"{gen['model']} for {summary['n_llm']} of {summary['n_games']} games, rule-based templates for the rest"
+    return gen["model"]
+
+
+def _track_record(backtest_report: dict[str, Any] | None, market_weight: float) -> str | None:
+    if not backtest_report or not isinstance(backtest_report.get("pooled"), dict):
+        return None
+    pooled = backtest_report["pooled"]
+    seasons = backtest_report.get("test_seasons") or []
+    try:
+        model, market, final = (float(pooled[k]["brier"]) for k in ("model", "market", "final"))
+        n_games, first, last = int(pooled["final"]["n_games"]), seasons[0], seasons[-1]
+    except (KeyError, TypeError, ValueError, IndexError):
+        logger.warning("backtest report is missing pooled metrics; track record omitted")
+        return None
+    best = min((("the market", market), ("the model", model), ("the blend", final)), key=lambda kv: kv[1])[0]
+    return (
+        f"- **Track record** (walk-forward, out of sample, {first}-{last}, {n_games:,} games): Brier score model "
+        f"{model:.4f}, market {market:.4f}, blend {final:.4f} (lower is better). {best[0].upper() + best[1:]} has "
+        f"been the most accurate; this week's blend puts {market_weight:.0%} of its weight on the market."
+    )
+
+
 def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any] | None = None) -> str:
     """Standalone Markdown newsletter for the week."""
-    season, week = contract_c["season"], contract_c["week"]
     model = contract_c["model"]
-    gen = contract_c["generator"]
     generated = M._parse_iso(contract_c["generated_at"])
-    writer = gen["model"] if gen["mode"] == "llm" else "rule-based templates"
+    as_of = M._parse_iso(contract_c["source"]["generated_at"])
     games = contract_c["games"]
     lines = [
-        f"# NFL Week {week} Scouting Report — {season} Season",
+        _title(contract_c),
         "",
-        f"_Generated {generated:%b %d, %Y %H:%M} UTC · win probabilities: calibrated XGBoost blended with the "
-        f"de-vigged market ({model['market_weight']:.0%} market weight) · write-ups: {writer}_",
+        f"_Generated {generated:%b %d, %Y %H:%M} UTC from predictions made {as_of:%b %d, %Y %H:%M} UTC · win "
+        f"probabilities: calibrated XGBoost blended with the de-vigged market ({model['market_weight']:.0%} market "
+        f"weight) · write-ups: {_writer_label(contract_c)}_",
         "",
         "## At a glance",
         "",
@@ -936,8 +1218,8 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
     for g in games:
         lines.append(
             f"| {g['away_team']} @ {g['home_team']} | {_md_cell(_local_kickoff(g['kickoff_utc']))} "
-            f"| {g['pick']['team']} | "
-            f"{g['pick']['win_prob']:.1%} | {g['confidence_tier']} | {_edge_text(g)} | {_result_text(g)} |"
+            f"| {g['pick']['team']} | {_pct_text(g['pick']['win_prob'])} | {g['confidence_tier']} | {_edge_text(g)} "
+            f"| {_result_text(g)} |"
         )
 
     upcoming = [g for g in games if g["status"] != "final"]
@@ -946,7 +1228,7 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
         group = [g for g in upcoming if g["confidence_tier"] == tier]
         if not group:
             continue
-        lines += ["", f"## {tier.title()}{'s' if not tier.endswith('S') else ''}", ""]
+        lines += ["", f"## {tier.title()}s", ""]
         for g in sorted(group, key=lambda x: -x["pick"]["win_prob"]):
             lines += _game_section(g)
     if finished:
@@ -960,19 +1242,9 @@ def render_newsletter(contract_c: dict[str, Any], backtest_report: dict[str, Any
         "- **Model vs market** is the model's win probability for the pick minus the de-vigged market's, in "
         "percentage points. The final number blends the two."
     )
-    if backtest_report and isinstance(backtest_report.get("pooled"), dict):
-        pooled = backtest_report["pooled"]
-        seasons = backtest_report.get("test_seasons") or []
-        try:
-            lines.append(
-                f"- **Track record** (walk-forward, out of sample, {seasons[0]}-{seasons[-1]}, "
-                f"{pooled['final']['n_games']:,} games): Brier score model {pooled['model']['brier']:.4f}, market "
-                f"{pooled['market']['brier']:.4f}, blend {pooled['final']['brier']:.4f} (lower is better). "
-                "The market has "
-                "been the stronger forecaster, which is why the blend leans on it."
-            )
-        except (KeyError, TypeError, IndexError):
-            logger.warning("backtest report is missing pooled metrics; track record omitted")
+    record = _track_record(backtest_report, model["market_weight"])
+    if record:
+        lines.append(record)
     lines += [
         "",
         "_For information and entertainment only. Not betting advice: probabilities are estimates and upsets happen._",
@@ -986,22 +1258,23 @@ def _game_section(g: dict[str, Any]) -> list[str]:
     side = g["pick"]["side"]
     market = g["market"]
     market_text = (
-        f"{g['pick']['team']} {market[f'{side}_wp']:.1%} ({_SOURCE_TEXT.get(market['source'], market['source'])})"
+        f"{g['pick']['team']} {_pct_text(market[f'{side}_wp'])} "
+        f"({_SOURCE_TEXT.get(market['source'], market['source'])})"
         if market
         else "no line"
     )
     lines = [
-        f"### {g['away_team']} @ {g['home_team']} — {report['headline']}",
+        f"### {g['away_team']} @ {g['home_team']} — {md_text(report['headline'])}",
         "",
-        f"**Pick:** {g['pick']['team']} {g['pick']['win_prob']:.1%} · **Tier:** {g['confidence_tier']} · "
-        f"**Model:** {g['pick']['team']} {g['model'][f'{side}_wp']:.1%} · **Market:** {market_text} · "
+        f"**Pick:** {g['pick']['team']} {_pct_text(g['pick']['win_prob'])} · **Tier:** {g['confidence_tier']} · "
+        f"**Model:** {g['pick']['team']} {_pct_text(g['model'][f'{side}_wp'])} · **Market:** {market_text} · "
         f"**Kickoff:** {_local_kickoff(g['kickoff_utc'])}",
         "",
-        report["the_pick_summary"],
+        md_text(report["the_pick_summary"]),
         "",
-        f"**Key mismatch.** {report['key_mismatch']}",
+        f"**Key mismatch.** {md_text(report['key_mismatch'])}",
         "",
-        f"**Risk factor.** {report['risk_factor']}",
+        f"**Risk factor.** {md_text(report['risk_factor'])}",
     ]
     if g["status"] == "final" and g["result"]:
         lines += [
@@ -1017,6 +1290,9 @@ def _game_section(g: dict[str, Any]) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
+STALE_AFTER: Final = timedelta(days=3)
+
+
 def newsletter_path(cfg: Settings, week: int) -> Path:
     return cfg.reports_dir / NEWSLETTER_NAME.format(week=week)
 
@@ -1032,6 +1308,24 @@ def _load_backtest(cfg: Settings) -> dict[str, Any] | None:
         return None
 
 
+def stale_contract_b_warnings(payload: dict[str, Any], now: datetime) -> list[str]:
+    """Reasons the Contract B payload may no longer describe the week (logged, not fatal)."""
+    warnings = []
+    generated = M._parse_iso(payload["generated_at"])
+    if generated is not None and now - generated > STALE_AFTER:
+        warnings.append(f"predictions were generated {(now - generated).days} days ago ({payload['generated_at']})")
+    kicked_off = [
+        g["game_id"]
+        for g in payload["games"]
+        if g["status"] == "scheduled" and (M._parse_iso(g["kickoff_utc"]) or now) <= now
+    ]
+    if kicked_off:
+        warnings.append(
+            f"{len(kicked_off)} game(s) marked scheduled have already kicked off ({', '.join(kicked_off[:3])})"
+        )
+    return warnings
+
+
 def run_report(
     cfg: Settings = settings,
     *,
@@ -1042,8 +1336,14 @@ def run_report(
     now: datetime | None = None,
     write: bool = True,
 ) -> dict[str, Any]:
-    """Read Contract B, generate reports, write Contract C and the newsletter. Returns the Contract C payload."""
+    """Read Contract B, generate reports, write Contract C and the newsletter. Returns the Contract C payload.
+
+    Nothing is written if a run-wide error occurs (auth, unknown model, daily quota).
+    """
+    now = M._as_utc(now or datetime.now(UTC))
     payload = load_contract_b(input_path or cfg.current_week_json)
+    for warning in stale_contract_b_warnings(payload, now):
+        logger.warning("Contract B may be stale: %s. Re-run `python -m src.model predict`.", warning)
     if mode == "llm" and writer is None:
         writer = GeminiReportWriter(cfg=cfg)
     if mode == "template":
@@ -1071,7 +1371,11 @@ def run_report(
     return contract_c
 
 
+EXIT_OK, EXIT_ERROR, EXIT_MISSING_KEY, EXIT_DEGRADED = 0, 1, 2, 3
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    """CLI. Exit codes: 0 ok, 1 error (nothing written), 2 missing API key, 3 written but no Gemini write-ups."""
     parser = argparse.ArgumentParser(
         prog="python -m src.report_generator", description="Generate the weekly scouting report."
     )
@@ -1089,6 +1393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         writer = None if args.template else GeminiReportWriter(cfg=settings, model=args.model)
         contract_c = run_report(
+            settings,  # module global looked up at call time (tests can redirect it)
             mode="template" if args.template else "llm",
             writer=writer,
             input_path=args.input,
@@ -1096,12 +1401,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except MissingLLMKeyError as exc:
         logger.error("%s", exc)
-        return 2
-    except (ReportError, ContractCError, M.ContractError, FileNotFoundError, ValueError) as exc:
-        logger.error("Report generation failed: %s", exc)
-        return 1
+        return EXIT_MISSING_KEY
+    except (ReportError, ContractCError, M.ContractError, FileNotFoundError, ValueError, KeyError, TypeError) as exc:
+        logger.error("Report generation failed (nothing written): %s: %s", type(exc).__name__, exc)
+        return EXIT_ERROR
     print(f"Wrote {settings.enriched_report_json} and {contract_c['newsletter_path']}")
-    return 0
+    if not args.template and contract_c["summary"]["n_llm"] == 0:
+        logger.warning("No game got a Gemini write-up; every report fell back to the template")
+        return EXIT_DEGRADED
+    return EXIT_OK
 
 
 if __name__ == "__main__":

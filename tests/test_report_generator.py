@@ -177,10 +177,9 @@ def test_grounding_requires_the_pick_and_bans_hype(facts):
 
 def test_pick_can_be_named_by_abbreviation_or_nickname(facts):
     f = facts[0]
-    for alias in (f.pick_abbr, R.team_nickname(f.pick_abbr), R.team_name(f.pick_abbr)):
-        R.validate_report(
-            _grounded_json(f, the_pick_summary=f"{alias} is the pick here, graded by the blended forecast."), f
-        )
+    tail = f"at {f.pick_pct:g}% ({f.tier}), per the blended forecast."
+    for alias in R.team_aliases(f.pick_abbr):
+        R.validate_report(_grounded_json(f, the_pick_summary=f"{alias} is the pick here {tail}"), f)
 
 
 def test_format_rules_apply_without_context_but_grounding_does_not(facts):
@@ -197,10 +196,10 @@ def test_fact_sheet_numbers_come_from_the_payload(payload, facts):
     for game, f in zip(payload["games"], facts, strict=True):
         side = game["pick"]["side"]
         assert f.pick_abbr == game["pick"]["team"]
-        assert round(100 * game["pick"]["win_prob"], 1) in f.allowed_percentages
-        assert round(100 * game["model"][f"{side}_wp"], 1) in f.allowed_percentages
+        assert R.pct_down(game["pick"]["win_prob"]) in f.allowed_percentages
+        assert R.pct_down(game["model"][f"{side}_wp"]) in f.allowed_percentages
         if game["market"] is not None:
-            assert round(100 * game["market"][f"{side}_wp"], 1) in f.allowed_percentages
+            assert R.pct_down(game["market"][f"{side}_wp"]) in f.allowed_percentages
             assert round(abs(game["model_edge_pct"]), 1) in f.allowed_percentages
         else:
             assert f.sheet["market"] == "no market line available"
@@ -214,7 +213,7 @@ def test_fact_sheet_numbers_come_from_the_payload(payload, facts):
         ("diff_early_down_sr", 0.05, "5.0 percentage points in favor of the Kansas City Chiefs"),
         ("net_pass_epa_mismatch", -0.2, "0.200 EPA per play in favor of the Buffalo Bills"),
         ("net_rest_days", -3, "3 more days of rest for the Buffalo Bills"),
-        ("diff_qb_cpoe", 4.2, "4.2 CPOE points in favor of the Kansas City Chiefs"),
+        ("diff_qb_cpoe", 4.2, "4.2 percentage points of CPOE in favor of the Kansas City Chiefs"),
     ],
 )
 def test_matchup_drivers_are_phrased_from_the_favored_side(feature, value, expected):
@@ -362,10 +361,10 @@ def test_gemini_writer_error_handling(cfg):
         writer.complete(R.SYSTEM_INSTRUCTION, "p")
 
     bad_request = _api_error(genai_errors.ClientError, 400, "INVALID_ARGUMENT", "Invalid JSON schema")
-    with pytest.raises(R.LLMRequestError, match="400"):
+    with pytest.raises(R.LLMConfigError, match="400"):
         R.GeminiReportWriter(cfg=cfg, client=_FakeClient(bad_request)).complete(R.SYSTEM_INSTRUCTION, "p")
 
-    with pytest.raises(R.LLMRequestError, match="no text"):
+    with pytest.raises(R.LLMEmptyResponseError, match="no text"):
         R.GeminiReportWriter(cfg=cfg, client=_FakeClient(None)).complete(R.SYSTEM_INSTRUCTION, "p")
 
 
@@ -395,7 +394,13 @@ def test_enrich_produces_valid_contract_c(payload, cfg):
             "fact sheet",
         ),
         (lambda c: c["games"][0]["report"].pop("key_mismatch"), "key_mismatch"),
-        (lambda c: c["summary"].update(n_template=5), "summary counts"),
+        (lambda c: c["summary"].update(n_template=5), "summary must be"),
+        (lambda c: c["summary"]["tiers"].update(LOCK=99), "summary must be"),
+        (lambda c: c["games"][0].update(report=json.dumps(c["games"][0]["report"])), "report must be an object"),
+        (lambda c: c["games"][0]["report_meta"].pop("fallback_reason"), "report_meta must hold"),
+        (lambda c: c["generator"].pop("model"), "generator must have keys"),
+        (lambda c: c.pop("tier_rules"), "tier_rules"),
+        (lambda c: c.update(source=None), "source must describe"),
         (lambda c: c["games"][0]["report_meta"].update(generator="gpt-9"), "generator"),
         (
             lambda c: c["games"][0].update(
@@ -492,3 +497,209 @@ def test_real_payload_template_report(cfg):
     contract_c = R.enrich_payload(payload, None, cfg=cfg, now=datetime.now(UTC))
     R.validate_contract_c(contract_c)
     assert R.render_newsletter(contract_c).count("### ") == len(payload["games"])
+
+
+# --------------------------------------------------------------------------- #
+# Regressions from the adversarial review
+# --------------------------------------------------------------------------- #
+def _summary_with(f: R.GameFacts, body: str) -> str:
+    return _grounded_json(f, the_pick_summary=body)
+
+
+def test_pick_summary_must_state_tier_and_final_probability(facts):  # RG-1
+    f = facts[0]
+    name = R.team_name(f.pick_abbr)
+    with pytest.raises(ValidationError, match="confidence tier"):
+        R.validate_report(_summary_with(f, f"The {name} are the pick at {f.pick_pct:g}% in a close game."), f)
+    with pytest.raises(ValidationError, match="final win probability"):
+        R.validate_report(_summary_with(f, f"The {name} are the pick here, graded {f.tier} by the forecast."), f)
+    wrong = next(t for t in M.TIERS if t != f.tier)
+    with pytest.raises(ValidationError, match="the tier for this game"):
+        R.validate_report(_summary_with(f, f"The {name} are a {wrong} at {f.pick_pct:g}% ({f.tier})."), f)
+    with pytest.raises(ValidationError, match="headline must name"):
+        R.validate_report(_grounded_json(f, headline="A big game with plenty on the line this week"), f)
+
+
+def test_teams_outside_the_game_are_rejected(facts):  # C1
+    f = facts[0]
+    outsider = next(abbr for abbr in R.TEAM_NAMES if abbr not in f.team_aliases)
+    with pytest.raises(ValidationError, match="not in this game"):
+        R.validate_report(
+            _grounded_json(f, risk_factor=f"This looks like last week's {R.team_name(outsider)} upset."), f
+        )
+    # lowercase common words that happen to be nicknames are not team mentions
+    R.validate_report(
+        _grounded_json(f, risk_factor="Paying the bills on third down has been an issue for both teams."), f
+    )
+
+
+def test_percent_tolerance_is_one_decimal_or_whole_number_rounding(facts):  # C1
+    f = facts[0]
+    fact = max(f.allowed_percentages - R.ALWAYS_ALLOWED_PERCENTAGES)
+    near_miss = round(fact + 0.4, 1)
+    with pytest.raises(ValidationError, match="not in the fact sheet"):
+        R.validate_report(
+            _grounded_json(f, risk_factor=f"Teams in this spot win {near_miss}% of the time, roughly."), f
+        )
+    R.validate_report(_grounded_json(f, risk_factor=f"Teams in this spot win {fact:g}% of the time in this model."), f)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "```json the pick is solid this week",
+        "~~~ fenced block opener in the risk factor",
+        "<!-- hidden comment that never closes",
+        "See [the chart](https://evil.example/x) for details",
+        "Tracking pixel ![x](https://evil.example/p.gif) here",
+        "Read more at https://example.com about this matchup",
+        "This is **really** the key matchup of the week",
+        "Use `code` formatting inside the risk factor",
+        "1. Starts like a numbered list in the risk factor",
+    ],
+)
+def test_markup_links_and_code_are_rejected(facts, text):  # RG-5 / C7
+    with pytest.raises(ValidationError, match="plain prose"):
+        R.validate_report(_grounded_json(facts[0], risk_factor=text), facts[0])
+
+
+def test_newsletter_escapes_report_text():  # RG-5 defence in depth
+    assert R.md_text("a [b](c) <x> *y* `z` ~~w~~ | q") == r"a \[b\](c) \<x\> \*y\* \`z\` \~\~w\~\~ \| q"
+    assert R.md_text("1. list").startswith(r"1\.")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The Bills simply can’t lose this one at home",  # curly apostrophe
+        "This one is guaran​tee​d to go the pick's way",  # zero-width spaces
+        "This is our best bet of the entire week of football",
+        "A sure-thing spot for the favorite in this matchup",
+        "Bet on the favorite before the line moves this week",
+    ],
+)
+def test_banned_language_survives_unicode_tricks(facts, text):  # RG-6
+    with pytest.raises(ValidationError, match="hype or betting"):
+        R.validate_report(_grounded_json(facts[0], risk_factor=text), facts[0])
+
+
+def test_reasonable_wording_is_not_rejected(facts):  # RG-7
+    f = facts[0]
+    R.validate_report(_grounded_json(f, risk_factor="There is no guarantee here: one turnover could swing it."), f)
+    R.validate_report(_grounded_json(f, risk_factor="Nothing is guaranteed in a divisional game like this one."), f)
+    assert "Kansas City" in R.team_aliases("KC") and "Niners" in R.team_aliases("SF")
+    assert R.team_city("LA") is None and R.team_city("NYJ") is None  # shared markets are ambiguous
+    stat, text = R.describe_driver("home_qb_cpoe_pre", 3.1, "KC", "BUF")
+    assert "3.1 percentage points" in text  # CPOE is groundable as percentage points
+
+
+def test_display_values_never_cross_tier_thresholds():  # C2
+    assert R.pct_down(0.7496) == 74.9 and R.pct_down(0.755) == 75.5 and R.pct_down(0.5) == 50.0
+    assert R.edge_down(4.95) == 4.9 and R.edge_down(-12.94) == -12.9 and R.edge_down(5.0) == 5.0
+    assert R._pair_pct(0.7496) == (74.9, 25.1)
+
+
+def test_writer_label_reflects_actual_generation(payload, cfg):  # C5
+    all_failed = R.enrich_payload(payload, ScriptedWriter(R.LLMRequestError("HTTP 503")), cfg=cfg, now=NOW)
+    assert R._writer_label(all_failed) == "rule-based templates (Gemini unavailable)"
+    assert "write-ups: rule-based templates (Gemini unavailable)" in R.render_newsletter(all_failed)
+    mixed = copy.deepcopy(all_failed)
+    mixed["summary"].update(n_llm=5, n_template=len(payload["games"]) - 5)
+    assert R._writer_label(mixed).startswith("fake-gemini for 5 of")
+
+
+def test_run_wide_errors_abort_without_writing(payload, cfg):  # runtime F1
+    cfg.predictions_dir.mkdir(parents=True)
+    cfg.current_week_json.write_text(json.dumps(payload))
+    for error in (
+        _api_error(genai_errors.ClientError, 404, "NOT_FOUND", "models/gemini-2.5-flsh is not found"),
+        _api_error(genai_errors.ClientError, 400, "FAILED_PRECONDITION", "User location is not supported"),
+    ):
+        writer = R.GeminiReportWriter(cfg=cfg, client=_FakeClient(*[error] * 20))
+        with pytest.raises(R.LLMConfigError):
+            R.run_report(cfg, writer=writer, now=NOW)
+        assert not cfg.enriched_report_json.exists() and not list(cfg.reports_dir.glob("*.md"))
+
+
+def test_expired_key_and_daily_quota_are_fatal(cfg):  # runtime F2, F3
+    expired = _api_error(
+        genai_errors.ClientError,
+        400,
+        "INVALID_ARGUMENT",
+        "API key expired. Please renew the API key.",
+        details=[{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "API_KEY_EXPIRED"}],
+    )
+    assert R.classify_api_error(expired) is R.LLMAuthError
+    daily = _api_error(
+        genai_errors.ClientError,
+        429,
+        "RESOURCE_EXHAUSTED",
+        "quota exceeded",
+        details=[
+            {
+                "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}],
+            }
+        ],
+    )
+    client = _FakeClient(daily, "{}")
+    with pytest.raises(R.LLMQuotaError):
+        R.GeminiReportWriter(cfg=cfg, client=client).complete(R.SYSTEM_INSTRUCTION, "p")
+    assert len(client.models.calls) == 1  # no futile retries
+    per_minute = _api_error(genai_errors.ClientError, 429, "RESOURCE_EXHAUSTED", "rate limited")
+    assert R.classify_api_error(per_minute) is None  # retried
+
+
+def test_empty_reply_uses_an_attempt_not_the_whole_budget(facts):  # runtime F4
+    f = facts[0]
+    writer = ScriptedWriter(R.LLMEmptyResponseError("no text"), _grounded_json(f))
+    result = R.generate_report(writer, f, max_attempts=3)
+    assert (result.generator, result.attempts) == ("fake-gemini", 2)
+    assert "no text" in result.validation_errors[0]
+
+
+def test_missing_tier_rules_is_a_contract_b_error(payload):  # runtime F5
+    broken = copy.deepcopy(payload)
+    del broken["tier_rules"]["LEAN"]
+    with pytest.raises(M.ContractError, match="tier_rules"):
+        M.validate_contract_b(broken)
+
+
+def test_stale_contract_b_is_flagged(payload):  # critic: stale input
+    later = datetime(2026, 10, 27, 12, tzinfo=UTC)
+    warnings = R.stale_contract_b_warnings(payload, later)
+    assert any("days ago" in w for w in warnings) and any("already kicked off" in w for w in warnings)
+    assert R.stale_contract_b_warnings(payload, NOW) == []
+
+
+def test_playoff_titles_and_track_record_follow_the_data(payload, cfg):  # contract C6, C9
+    playoff = copy.deepcopy(payload)
+    for g in playoff["games"]:
+        g["game_type"] = "SB"
+    contract_c = R.enrich_payload(playoff, None, cfg=cfg, now=NOW)
+    assert R.render_newsletter(contract_c).startswith("# NFL Super Bowl Scouting Report — 2026 Season")
+    model_wins = {
+        "test_seasons": [2018, 2025],
+        "pooled": {
+            "model": {"brier": 0.20, "n_games": 9},
+            "market": {"brier": 0.21, "n_games": 9},
+            "final": {"brier": 0.205, "n_games": 9},
+        },
+    }
+    assert "The model has been the most accurate" in R._track_record(model_wins, 0.3)
+
+
+def test_main_exit_codes(payload, cfg, monkeypatch):  # degraded runs are visible to orchestration
+    cfg.predictions_dir.mkdir(parents=True)
+    cfg.current_week_json.write_text(json.dumps(payload))
+    monkeypatch.setattr(R, "settings", cfg)
+    monkeypatch.setattr(R, "GeminiReportWriter", lambda cfg, model=None: ScriptedWriter(R.LLMRequestError("HTTP 503")))
+    assert R.main([]) == R.EXIT_DEGRADED and cfg.enriched_report_json.exists()
+    assert R.main(["--template"]) == R.EXIT_OK
+
+    def fatal(cfg, model=None):
+        return ScriptedWriter(R.LLMConfigError("model not found"))
+
+    cfg.enriched_report_json.unlink()
+    monkeypatch.setattr(R, "GeminiReportWriter", fatal)
+    assert R.main([]) == R.EXIT_ERROR and not cfg.enriched_report_json.exists()

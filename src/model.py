@@ -620,42 +620,67 @@ def _odds_consensus_to_market(consensus: pl.DataFrame, source: str) -> pl.DataFr
 
 
 def _nflverse_current_lines(
-    schedules: pl.DataFrame, week_games: pl.DataFrame, cfg: Settings, now: datetime
+    schedules: pl.DataFrame, week_games: pl.DataFrame, fetched_at: datetime | None, now: datetime
 ) -> pl.DataFrame:
-    """nflverse moneylines for the week: a game that has kicked off has a closing line; otherwise
-    the line is pre-game, as of the schedules cache fetch time."""
-    entry = ingest.CacheManifest(cfg.manifest_path).get("schedules", None)
-    fetched_at = entry.fetched_at if entry is not None else None
+    """nflverse moneylines for the week, labelled by when the cached line was *observed*.
+
+    A line counts as a close (``nflverse_close``) only if the schedules cache was
+    fetched after kickoff. Otherwise it is a pre-game line (``nflverse_line``),
+    stamped with that fetch time, even if the game has kicked off since.
+    ``fetched_at`` must describe the ``schedules`` frame passed in; it is clamped
+    to ``now`` so a line is never dated after the prediction.
+    """
+    observed = None if fetched_at is None else min(_as_utc(fetched_at), now)
     kickoffs = week_games.select("game_id", "kickoff_utc")
+    closed = pl.lit(False) if observed is None else pl.col("kickoff_utc") <= pl.lit(observed, pl.Datetime("us", "UTC"))
     return (
         _normalize_market(nflverse_market_probs(schedules))
         .join(kickoffs, on="game_id", how="inner")
         .with_columns(
             pl.when(pl.col("market_home_wp").is_null())
             .then(None)
-            .when(pl.col("kickoff_utc") <= now)
+            .when(closed)
             .then(pl.lit("nflverse_close"))
             .otherwise(pl.lit("nflverse_line"))
             .alias("market_source"),
-            pl.when(pl.col("kickoff_utc") > now)
-            .then(pl.lit(fetched_at, pl.Datetime("us", "UTC")))
-            .alias("market_as_of"),
+            pl.when(closed).then(None).otherwise(pl.lit(observed, pl.Datetime("us", "UTC"))).alias("market_as_of"),
         )
         .drop("kickoff_utc")
     )
+
+
+def schedules_fetched_at(cfg: Settings) -> datetime | None:
+    """When the cached schedules (and their moneylines) were downloaded, per the cache manifest."""
+    entry = ingest.CacheManifest(cfg.manifest_path).get("schedules", None)
+    return entry.fetched_at if entry is not None else None
 
 
 def add_kickoff_if_missing(games: pl.DataFrame) -> pl.DataFrame:
     return games if "kickoff_utc" in games.columns else ingest.add_kickoff_utc(games)
 
 
-def latest_odds_snapshot(cfg: Settings, season: int, week: int) -> pl.DataFrame | None:
-    """Most recent consensus snapshot saved by ``src.ingest`` for this season/week."""
-    files = sorted((cfg.odds_dir / str(season)).glob(f"odds_{season}_wk{week:02d}_*_consensus.parquet"))
-    if not files:
+def latest_odds_snapshot(cfg: Settings, season: int, week: int, now: datetime | None = None) -> pl.DataFrame | None:
+    """Most recent consensus snapshot saved by ``src.ingest`` for this season/week, as of ``now``.
+
+    Snapshots stamped after ``now`` are ignored, so a replayed or backfilled
+    prediction never sees market prices from its future.
+    """
+    cutoff = _as_utc(now) if now is not None else None
+    usable: list[tuple[datetime, Path]] = []
+    for path in (cfg.odds_dir / str(season)).glob(f"odds_{season}_wk{week:02d}_*_consensus.parquet"):
+        stamp = path.stem.removesuffix("_consensus").rsplit("_", 1)[-1]
+        try:
+            taken = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+        except ValueError:
+            logger.warning("Ignoring odds snapshot with an unrecognised name: %s", path.name)
+            continue
+        if cutoff is None or taken <= cutoff:
+            usable.append((taken, path))
+    if not usable:
         return None
-    logger.info("Using saved odds snapshot %s", files[-1].name)
-    return pl.read_parquet(files[-1])
+    taken, path = max(usable)
+    logger.debug("Latest saved odds snapshot as of %s: %s", _iso(cutoff), path.name)
+    return pl.read_parquet(path)
 
 
 def current_market_probs(
@@ -665,6 +690,7 @@ def current_market_probs(
     *,
     use_odds_api: bool = True,
     now: datetime | None = None,
+    schedules_fetched_at_override: datetime | None = None,
 ) -> pl.DataFrame:
     """Best available de-vigged market probability per current-week game.
 
@@ -674,6 +700,11 @@ def current_market_probs(
     Odds API, so they fall back to nflverse closing lines.
     """
     now = _as_utc(now or datetime.now(UTC))
+    # Read before the live fetch: fetch_market_win_probs may refresh the schedules cache, and the
+    # moneylines used below come from the `schedules` frame passed in, not from that refresh.
+    lines_fetched_at = (
+        schedules_fetched_at(cfg) if schedules_fetched_at_override is None else schedules_fetched_at_override
+    )
     season, week = int(week_games["season"][0]), int(week_games["week"][0])
     ids = week_games["game_id"].implode()
     candidates: list[pl.DataFrame] = []
@@ -684,10 +715,10 @@ def current_market_probs(
             logger.info("ODDS_API_KEY is not set; using saved snapshots / nflverse lines")
         except ingest.IngestError as exc:
             logger.warning("Live odds unavailable (%s); using saved snapshots / nflverse lines", exc)
-    snapshot = latest_odds_snapshot(cfg, season, week)
+    snapshot = latest_odds_snapshot(cfg, season, week, now)
     if snapshot is not None:
         candidates.append(_odds_consensus_to_market(snapshot, "odds_api_snapshot"))
-    candidates.append(_nflverse_current_lines(schedules, add_kickoff_if_missing(week_games), cfg, now))
+    candidates.append(_nflverse_current_lines(schedules, add_kickoff_if_missing(week_games), lines_fetched_at, now))
 
     ranked = pl.concat([c.with_columns(pl.lit(rank).alias("_rank")) for rank, c in enumerate(candidates)])
     return (
@@ -1041,6 +1072,14 @@ def _check_contract_b(payload: dict[str, Any], problems: list[str]) -> None:
     else:
         problems.append("model must be an object")
 
+    tier_rules = payload.get("tier_rules")
+    check(
+        isinstance(tier_rules, dict)
+        and set(tier_rules) == set(TIERS)
+        and all(isinstance(v, str) and v for v in tier_rules.values()),
+        f"tier_rules must map each of {TIERS} to a description",
+    )
+
     games = payload.get("games")
     if not isinstance(games, list):
         problems.append("games must be a list")
@@ -1266,16 +1305,19 @@ def run_current_week(
     write: bool = True,
 ) -> dict[str, Any]:
     """Load cached data, predict the current NFL week and write ``data/predictions/current_week.json``."""
-    now = now or datetime.now(UTC)
+    now = _as_utc(now or datetime.now(UTC))
     cache = ingest.get_cache() if cfg is settings else ingest.NflverseCache(cfg)
     features = F.build_and_save(cfg) if rebuild_features else F.load_features(cfg)
     schedules = cache.read("schedules", refresh=False)
+    lines_fetched_at = schedules_fetched_at(cfg)  # provenance of the moneylines in `schedules`
     week_games = ingest.current_week_games(schedules, now)
     if week_games.is_empty():
         raise ModelError("no upcoming games in the current season schedule")
     season, week = int(week_games["season"][0]), int(week_games["week"][0])
 
-    market = current_market_probs(week_games, schedules, cfg, use_odds_api=use_odds_api, now=now)
+    market = current_market_probs(
+        week_games, schedules, cfg, use_odds_api=use_odds_api, now=now, schedules_fetched_at_override=lines_fetched_at
+    )
     payload = predict_week(features, schedules, market, season=season, week=week, now=now)
     if write:
         write_payload(payload, cfg.current_week_json)

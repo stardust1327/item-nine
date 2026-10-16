@@ -14,7 +14,7 @@ import polars as pl
 import pytest
 from sklearn.calibration import CalibratedClassifierCV
 
-from config import Settings
+from config import Settings, settings
 from src import features as F
 from src import ingest
 from src import model as M
@@ -394,14 +394,27 @@ def test_current_market_priority(tmp_path, monkeypatch, league):
     assert by_id[ids[1]]["market_source"] == "nflverse_line"
     assert {by_id[i]["market_source"] for i in ids[2:]} == {"nflverse_line"}
     assert {by_id[i]["market_method"] for i in ids[1:]} == {"nflverse_moneyline"}
-    after_kickoff = M.current_market_probs(week_games, schedules, cfg, use_odds_api=False, now=NOW + timedelta(days=5))
-    assert set(after_kickoff.filter(pl.col("market_source").str.starts_with("nflverse"))["market_source"]) == {
-        "nflverse_close"
-    }
-    assert (
-        after_kickoff.filter(pl.col("market_source") == "nflverse_close")["market_as_of"].null_count()
-        == after_kickoff.filter(pl.col("market_source") == "nflverse_close").height
+    # A line counts as a close only if it was observed after kickoff (schedules fetched after the game began).
+    early_fetch, late_fetch = NOW - timedelta(days=1), NOW + timedelta(days=6)
+    stale = M.current_market_probs(
+        week_games,
+        schedules,
+        cfg,
+        use_odds_api=False,
+        now=NOW + timedelta(days=5),
+        schedules_fetched_at_override=early_fetch,
     )
+    nflverse = stale.filter(pl.col("market_source").str.starts_with("nflverse"))
+    assert set(nflverse["market_source"]) == {"nflverse_line"}  # kicked off since, but the line predates kickoff
+    assert set(nflverse["market_as_of"].to_list()) == {early_fetch}
+    closes = M.current_market_probs(
+        week_games, schedules, cfg, use_odds_api=False, now=late_fetch, schedules_fetched_at_override=late_fetch
+    ).filter(pl.col("market_source").str.starts_with("nflverse"))
+    assert set(closes["market_source"]) == {"nflverse_close"} and closes["market_as_of"].null_count() == closes.height
+    future = M.current_market_probs(
+        week_games, schedules, cfg, use_odds_api=False, now=NOW, schedules_fetched_at_override=NOW + timedelta(hours=3)
+    ).filter(pl.col("market_source") == "nflverse_line")
+    assert all(ts <= NOW for ts in future["market_as_of"].to_list())  # never dated after the prediction
 
     monkeypatch.setattr(ingest, "fetch_market_win_probs", lambda **_: _consensus(ids, 0.55, spread_only=(ids[0],)))
     live = M.current_market_probs(week_games, schedules, cfg, use_odds_api=True, now=NOW)
@@ -464,3 +477,58 @@ def test_payload_reports_imputed_inputs(league):
     game = next(g for g in payload["games"] if g["game_id"] == week_ids[0])
     assert "is_high_wind_outdoor" in game["imputed_inputs"]
     assert all(d["feature"] != "is_high_wind_outdoor" for d in game["top_drivers"])
+
+
+def test_failed_live_fetch_after_cache_refresh_does_not_abort(tmp_path, monkeypatch, league):
+    """Regression: a schedules refresh during the live fetch must not stamp nflverse lines after `now`."""
+    features, schedules = league
+    cfg = dataclasses.replace(Settings.from_env(project_root=tmp_path), odds_api_key=None)
+    week_games = features.filter((pl.col("season") == 2026) & (pl.col("week") == 6))
+    read_at = NOW - timedelta(hours=20)
+
+    def refresh_then_fail(**_):
+        # what fetch_market_win_probs does when the schedules cache is stale: refresh it (stamped later), then fail
+        manifest = ingest.CacheManifest(cfg.manifest_path)
+        manifest.put(
+            ingest.CacheEntry(
+                "schedules", None, "schedules/schedules.parquet", NOW + timedelta(minutes=5), 1, None, False
+            )
+        )
+        raise ingest.OddsAPIRateLimitError("rate limited")
+
+    monkeypatch.setattr(ingest, "fetch_market_win_probs", refresh_then_fail)
+    market = M.current_market_probs(
+        week_games, schedules, cfg, use_odds_api=True, now=NOW, schedules_fetched_at_override=read_at
+    )
+    assert set(market["market_source"]) == {"nflverse_line"}
+    assert set(market["market_as_of"].to_list()) == {read_at}
+    M.predict_week(features, schedules, market, season=2026, week=6, now=NOW)  # validates; previously raised
+
+
+@pytest.mark.skipif(
+    not (settings.features_path.exists() and (settings.raw_dir / "schedules" / "schedules.parquet").exists()),
+    reason="needs the real cache",
+)
+def test_run_current_week_accepts_naive_datetimes():
+    payload = M.run_current_week(
+        now=datetime(2026, 10, 16, 18), use_odds_api=False, rebuild_features=False, write=False
+    )
+    assert payload["generated_at"] == "2026-10-16T18:00:00Z"
+
+
+def test_snapshots_from_after_now_are_ignored(tmp_path, league):
+    """Replays/backfills must not see market prices saved after the prediction time."""
+    features, schedules = league
+    cfg = dataclasses.replace(Settings.from_env(project_root=tmp_path), odds_api_key=None)
+    week_games = features.filter((pl.col("season") == 2026) & (pl.col("week") == 6))
+    ids = week_games["game_id"].to_list()
+    folder = cfg.odds_dir / "2026"
+    folder.mkdir(parents=True)
+    _consensus(ids, 0.61).with_columns(pl.lit(NOW - timedelta(hours=1)).alias("fetched_at")).write_parquet(
+        folder / "odds_2026_wk06_20261016T170000Z_consensus.parquet"
+    )
+    _consensus(ids, 0.77).write_parquet(folder / "odds_2026_wk06_20261016T190000Z_consensus.parquet")  # after NOW
+    assert M.latest_odds_snapshot(cfg, 2026, 6, NOW)["market_home_wp"][0] == pytest.approx(0.61)
+    assert M.latest_odds_snapshot(cfg, 2026, 6)["market_home_wp"][0] == pytest.approx(0.77)
+    market = M.current_market_probs(week_games, schedules, cfg, use_odds_api=False, now=NOW)
+    assert market["market_home_wp"].to_list() == pytest.approx([0.61] * len(ids))

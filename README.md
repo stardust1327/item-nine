@@ -68,6 +68,31 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
 - Games without a moneyline fall back to a win probability implied by the spread, using Normal(μ, σ = 13.45).
 - Every pull is saved to `data/raw/odds/` for closing-line-value analysis.
 
+## Model and weekly predictions
+
+`python -m src.model` runs the walk-forward backtest and then predicts the current week.
+
+- **Walk-forward validation.** To score season S, the model trains on 2016 through S-2, calibrates on S-1 and is scored on S. There is never a random split.
+- **Model.** `XGBClassifier(max_depth=4, learning_rate=0.03, n_estimators=250, subsample=0.8, colsample_bytree=0.8)`, frozen after training and wrapped in `CalibratedClassifierCV(method="sigmoid")`.
+- **Blend.** `final = w·market + (1-w)·model`. The market weight `w` is chosen by `scipy.optimize` to minimize Brier score on cross-fitted probabilities from the calibration season. It starts from 0.60, and 0.60 is the fallback.
+- **Market data.** The current week uses de-vigged Odds API consensus lines, then a saved snapshot, then nflverse lines. History uses nflverse closing lines.
+- **Output.** `data/predictions/current_week.json` (Contract B) holds, per game: the pick, final/model/market win probabilities, `model_edge_pct`, `value_team`, a tier, and the top 3 SHAP drivers.
+- **Tiers.** LOCK means the pick is at least 75% and the model also favors it. VALUE EDGE means the model is at least 5 points above the market on the pick. LEAN means at least 55%. Everything else is a COIN FLIP.
+- **Backtest output.** `data/predictions/backtest_report.json` and `backtest_predictions.parquet`. Pooled out-of-sample Brier for 2018–2026: model 0.233, market 0.211, blend 0.212.
+
+## Scouting reports
+
+`python -m src.report_generator` turns Contract B into prose with Gemini (`google-genai`, default `gemini-2.5-flash`, key `GEMINI_API_KEY`). `--template` skips the LLM.
+
+- **Validation.** Each game's report is checked by a Pydantic model with four required fields: `headline`, `the_pick_summary`, `key_mismatch` and `risk_factor`. It must be plain prose, and it is grounded against that game's fact sheet:
+  - it names the pick, its tier and its final win probability
+  - every percentage comes from the fact sheet
+  - no other team or tier is mentioned
+  - there is no hype or betting language
+- **Retries.** A rejected reply is sent back with the errors, up to 3 attempts. After that the game gets a deterministic template report, flagged in `report_meta`.
+- **Output.** `data/predictions/weekly_report_enriched.json` (Contract C: Contract B plus `report` and `report_meta` per game, re-validated) and `reports/week_XX_report.md`.
+- **Exit codes.** 0 ok; 1 error, with nothing written (auth, unknown model, daily quota, bad input); 2 missing API key; 3 written, but no game got a Gemini write-up.
+
 ## Feature matrix
 
 `src/features.py` writes one row per scheduled game, both played and upcoming, to `data/processed/features.parquet`. Columns are grouped as `ID_COLUMNS`, `FEATURE_COLUMNS` (model inputs, all known before kickoff), `REFERENCE_COLUMNS` (the closing spread, used only for benchmarking) and `LABEL_COLUMNS`.
