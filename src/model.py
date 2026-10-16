@@ -43,7 +43,7 @@ import logging
 import math
 import sys
 from collections.abc import Iterable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -1350,6 +1350,89 @@ def write_payload(payload: dict[str, Any], path: Path, archive: Path | None = No
     return path
 
 
+@dataclass(frozen=True, slots=True)
+class WeekTarget:
+    """The week to predict. ``is_current`` marks the current NFL week (earliest week with a game yet to kick off)."""
+
+    season: int
+    week: int
+    is_current: bool
+    games: pl.DataFrame = field(compare=False, repr=False)  # the week's schedule rows, with ``kickoff_utc``
+
+
+def resolve_week(
+    schedules: pl.DataFrame, now: datetime, *, season: int | None = None, week: int | None = None
+) -> WeekTarget:
+    """Pick the week to predict: the current week by default, or a given past or current week.
+
+    ``season`` defaults to the season in progress and ``week`` to that season's current week. A week after the
+    current one is rejected: its features would repeat the current week's and no market has priced it yet.
+    """
+    now = _as_utc(now)
+    season = season if season is not None else ingest.current_season(now)
+    games = add_kickoff_if_missing(schedules.filter(pl.col("season") == season))
+    if games.is_empty():
+        raise ModelError(f"no {season} games in the cached schedules")
+    current = ingest.current_week_games(schedules, now, season)
+    current_week = int(current["week"][0]) if current.height else None
+    if week is None:
+        if current_week is None:
+            raise ModelError(f"the {season} season has no upcoming games; pass a week to replay a past one")
+        week = current_week
+    elif current_week is not None and week > current_week:
+        raise ModelError(f"{season} week {week} is in the future; the current week is {current_week}")
+    week_games = games.filter(pl.col("week") == week).sort("kickoff_utc")
+    if week_games.is_empty():
+        raise ModelError(f"no games scheduled in {season} week {week}")
+    return WeekTarget(season, week, week == current_week, week_games)
+
+
+def run_week(
+    cfg: Settings = settings,
+    *,
+    target: WeekTarget | None = None,
+    now: datetime | None = None,
+    use_odds_api: bool = True,
+    rebuild_features: bool = True,
+    write: bool = True,
+) -> dict[str, Any]:
+    """Predict ``target`` (default: the current week, see :func:`resolve_week`) and write Contract B.
+
+    The archive ``week_XX_YYYY_preds.json`` is always written. ``current_week.json`` is written only for the
+    current week, so replaying a past week never replaces the latest predictions. Live odds exist only for the
+    current week; other weeks use saved snapshots and nflverse lines.
+    """
+    now = _as_utc(now or datetime.now(UTC))
+    cache = ingest.get_cache() if cfg is settings else ingest.NflverseCache(cfg)
+    features = F.build_and_save(cfg) if rebuild_features else F.load_features(cfg)
+    schedules = cache.read("schedules", refresh=False)
+    lines_fetched_at = schedules_fetched_at(cfg)  # provenance of the moneylines in `schedules`
+    target = target or resolve_week(schedules, now)
+    if use_odds_api and not target.is_current:
+        logger.info(
+            "Live odds exist only for the current week; %d week %d uses saved snapshots / nflverse lines",
+            target.season,
+            target.week,
+        )
+
+    market = current_market_probs(
+        target.games,
+        schedules,
+        cfg,
+        use_odds_api=use_odds_api and target.is_current,
+        now=now,
+        schedules_fetched_at_override=lines_fetched_at,
+    )
+    payload = predict_week(features, schedules, market, season=target.season, week=target.week, now=now)
+    if write:
+        archive = cfg.preds_archive_json(target.season, target.week)
+        if target.is_current:
+            write_payload(payload, cfg.current_week_json, archive)
+        else:
+            write_payload(payload, archive)
+    return payload
+
+
 def run_current_week(
     cfg: Settings = settings,
     *,
@@ -1359,23 +1442,7 @@ def run_current_week(
     write: bool = True,
 ) -> dict[str, Any]:
     """Load cached data, predict the current NFL week and write ``data/predictions/current_week.json``."""
-    now = _as_utc(now or datetime.now(UTC))
-    cache = ingest.get_cache() if cfg is settings else ingest.NflverseCache(cfg)
-    features = F.build_and_save(cfg) if rebuild_features else F.load_features(cfg)
-    schedules = cache.read("schedules", refresh=False)
-    lines_fetched_at = schedules_fetched_at(cfg)  # provenance of the moneylines in `schedules`
-    week_games = ingest.current_week_games(schedules, now)
-    if week_games.is_empty():
-        raise ModelError("no upcoming games in the current season schedule")
-    season, week = int(week_games["season"][0]), int(week_games["week"][0])
-
-    market = current_market_probs(
-        week_games, schedules, cfg, use_odds_api=use_odds_api, now=now, schedules_fetched_at_override=lines_fetched_at
-    )
-    payload = predict_week(features, schedules, market, season=season, week=week, now=now)
-    if write:
-        write_payload(payload, cfg.current_week_json, cfg.preds_archive_json(season, week))
-    return payload
+    return run_week(cfg, now=now, use_odds_api=use_odds_api, rebuild_features=rebuild_features, write=write)
 
 
 def run_backtest(

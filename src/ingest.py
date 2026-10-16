@@ -50,7 +50,7 @@ import tempfile
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -377,6 +377,8 @@ class NflverseCache:
         self.manifest = CacheManifest(cfg.manifest_path)
         self._schedules: pl.DataFrame | None = None
         self._schedules_unavailable = False
+        # Refreshes that failed while an older cached copy (or nothing) was kept, e.g. "pbp 2026: <error>".
+        self.refresh_failures: list[str] = []
         # This class is the cache; nflreadpy's own in-memory copy would only double RAM.
         update_config(cache_mode=CacheMode.OFF, timeout=cfg.nflverse_timeout_s, verbose=False)
 
@@ -459,6 +461,7 @@ class NflverseCache:
                 df = df.filter(pl.col("season") >= self.cfg.start_season)
                 self._store(spec, None, df, fetched_at=utc_now(), final=False)
             except NflverseDownloadError as exc:
+                self.refresh_failures.append(f"schedules: {exc}")
                 if not path.exists():
                     self._schedules_unavailable = True
                     raise
@@ -509,10 +512,13 @@ class NflverseCache:
                     logger.warning(
                         "Keeping stale %s %d from %s: %s", spec.name, season, entry.fetched_at.isoformat(), exc
                     )
+                    self.refresh_failures.append(f"{spec.name} {season}: {exc}")
                     entries.append(entry)
                     continue
                 if season == current:
                     logger.warning("Skipping %s %d: %s", spec.name, season, exc)
+                    if not exc.not_found:  # not published yet (preseason) is expected, not a failure
+                        self.refresh_failures.append(f"{spec.name} {season}: {exc}")
                     continue
                 raise
             fetched_at = utc_now()
@@ -651,6 +657,18 @@ def get_injuries(
     return get_cache().read("injuries", seasons, columns=columns, refresh=refresh)
 
 
+def current_season(now: datetime | None = None) -> int:
+    """The NFL season in progress at ``now`` (default: today), or the one that just ended.
+
+    Same rule as ``nflreadpy.get_current_season``: a season starts on the Thursday after Labor Day.
+    """
+    if now is None:
+        return int(nfl.get_current_season())
+    today = now.astimezone(UTC).date() if now.tzinfo else now.date()
+    labor_day = next(date(today.year, 9, d) for d in range(1, 8) if date(today.year, 9, d).weekday() == 0)
+    return today.year if today >= labor_day + timedelta(days=3) else today.year - 1
+
+
 def current_week_games(schedules: pl.DataFrame, now: datetime | None = None, season: int | None = None) -> pl.DataFrame:
     """All games of the current NFL week, with ``kickoff_utc``.
 
@@ -659,7 +677,7 @@ def current_week_games(schedules: pl.DataFrame, now: datetime | None = None, sea
     season is over.
     """
     now = now or utc_now()
-    season = season if season is not None else nfl.get_current_season()
+    season = season if season is not None else current_season(now)
     games = add_kickoff_utc(schedules.filter(pl.col("season") == season))
     upcoming = games.filter(pl.col("result").is_null() & (pl.col("kickoff_utc") > now))
     if upcoming.is_empty():

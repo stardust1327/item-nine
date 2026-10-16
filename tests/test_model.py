@@ -18,6 +18,7 @@ from config import Settings, settings
 from src import features as F
 from src import ingest
 from src import model as M
+from tests import fakes
 
 NOW = datetime(2026, 10, 16, 18, 0, tzinfo=UTC)
 
@@ -581,3 +582,40 @@ def test_snapshots_from_after_now_are_ignored(tmp_path, league):
     assert M.latest_odds_snapshot(cfg, 2026, 6)["market_home_wp"][0] == pytest.approx(0.77)
     market = M.current_market_probs(week_games, schedules, cfg, use_odds_api=False, now=NOW)
     assert market["market_home_wp"].to_list() == pytest.approx([0.61] * len(ids))
+
+
+# --------------------------------------------------------------------------- #
+# Week selection (current week, replays) and run_week outputs
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def nflverse_schedules(league) -> pl.DataFrame:
+    features, moneylines = league
+    return fakes.nflverse_schedules(features, moneylines)
+
+
+def test_resolve_week_defaults_to_the_current_week(nflverse_schedules):
+    target = M.resolve_week(nflverse_schedules, NOW)
+    assert (target.season, target.week, target.is_current) == (2026, 6, True)
+    assert target.games.height == 8 and target.games["kickoff_utc"].is_sorted()
+    assert M.resolve_week(nflverse_schedules, NOW, season=2026) == target
+
+
+def test_resolve_week_replays_past_weeks_and_rejects_future_ones(nflverse_schedules):
+    past = M.resolve_week(nflverse_schedules, NOW, week=5)
+    assert (past.season, past.week, past.is_current) == (2026, 5, False)
+    old = M.resolve_week(nflverse_schedules, NOW, season=2024, week=18)
+    assert (old.season, old.week, old.is_current) == (2024, 18, False)
+    with pytest.raises(M.ModelError, match="week 7 is in the future; the current week is 6"):
+        M.resolve_week(nflverse_schedules, NOW, week=7)
+    with pytest.raises(M.ModelError, match="no 2031 games"):
+        M.resolve_week(nflverse_schedules, NOW, season=2031)
+    with pytest.raises(M.ModelError, match="2025 season has no upcoming games"):
+        M.resolve_week(nflverse_schedules, NOW, season=2025)
+    with pytest.raises(M.ModelError, match="no games scheduled in 2025 week 21"):
+        M.resolve_week(nflverse_schedules, NOW, season=2025, week=21)
+
+
+def test_resolve_week_season_follows_now_not_the_wall_clock(nflverse_schedules):
+    """A pinned `now` picks its own season, so replays and tests don't depend on today's date."""
+    with pytest.raises(M.ModelError, match="the 2025 season has no upcoming games"):
+        M.resolve_week(nflverse_schedules, datetime(2026, 9, 1, tzinfo=UTC))  # before the 2026 season starts

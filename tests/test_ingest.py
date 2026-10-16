@@ -393,9 +393,40 @@ def test_cache_adopts_files_when_manifest_is_lost(cfg, fake_nfl):
 
 def test_missing_current_season_file_is_skipped(cfg, fake_nfl):
     fake_nfl.missing = {("injuries", 2026)}
-    entries = NflverseCache(cfg).sync("injuries")
+    cache = NflverseCache(cfg)
+    entries = cache.sync("injuries")
     assert [e.season for e in entries] == [2024, 2025]
     assert fake_nfl.downloads("injuries") == [2024, 2025, 2026]  # 404 is not retried
+    assert cache.refresh_failures == []  # not published yet is expected (preseason), not a failed refresh
+
+
+def test_failed_refresh_keeps_the_stale_copy_and_is_recorded(cfg, fake_nfl, monkeypatch):
+    NflverseCache(cfg).sync_all(["schedules", "pbp"])
+    monkeypatch.setattr(ingest, "utc_now", lambda: NOW + timedelta(days=7))  # the weekly refresh is due
+
+    def offline(*_args):
+        raise ConnectionError("network unreachable")
+
+    monkeypatch.setattr(nfl, "load_pbp", offline)
+    monkeypatch.setattr(nfl, "load_schedules", offline)
+    cache = NflverseCache(cfg)
+    summary = cache.sync_all(["schedules", "pbp"])
+    assert [e.season for e in summary["pbp"]] == [2024, 2025, 2026]  # the old 2026 copy is still served
+    assert [f.split(":")[0] for f in cache.refresh_failures] == ["schedules", "pbp 2026"]
+    assert "network unreachable" in cache.refresh_failures[1]
+
+
+@pytest.mark.parametrize(
+    ("now", "season"),
+    [
+        (datetime(2026, 9, 9, 23, tzinfo=UTC), 2025),  # Labor Day 2026 is Sep 7; the season starts Thursday Sep 10
+        (datetime(2026, 9, 10, tzinfo=UTC), 2026),
+        (datetime(2027, 2, 10, tzinfo=UTC), 2026),  # Super Bowl month belongs to the previous season
+        (datetime(2025, 9, 4, tzinfo=UTC), 2025),
+    ],
+)
+def test_current_season_follows_now(now, season):
+    assert ingest.current_season(now) == season
 
 
 def test_missing_past_season_file_raises(cfg, fake_nfl):

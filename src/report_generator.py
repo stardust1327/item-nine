@@ -1335,10 +1335,12 @@ def run_report(
     allow_fallback: bool = True,
     now: datetime | None = None,
     write: bool = True,
+    update_latest: bool = True,
 ) -> dict[str, Any]:
     """Read Contract B, generate reports, write Contract C and the newsletter. Returns the Contract C payload.
 
-    Nothing is written if a run-wide error occurs (auth, unknown model, daily quota).
+    Contract C goes to its ``week_XX_YYYY_enriched.json`` archive and, with ``update_latest``, to
+    ``weekly_report_enriched.json``. Nothing is written if a run-wide error occurs (auth, unknown model, daily quota).
     """
     now = M._as_utc(now or datetime.now(UTC))
     payload = load_contract_b(input_path or cfg.current_week_json)
@@ -1367,10 +1369,12 @@ def run_report(
     if write:
         text = json.dumps(contract_c, indent=2, allow_nan=False) + "\n"
         archive = cfg.enriched_archive_json(payload["season"], payload["week"])
-        ingest.write_text_atomic(text, cfg.enriched_report_json)
+        if update_latest:
+            ingest.write_text_atomic(text, cfg.enriched_report_json)
         ingest.write_text_atomic(text, archive)
         ingest.write_text_atomic(render_newsletter(contract_c, _load_backtest(cfg)), md_path)
-        logger.info("Wrote %s, %s and %s", cfg.enriched_report_json, archive.name, md_path)
+        written = [cfg.enriched_report_json.name] if update_latest else []
+        logger.info("Wrote %s and %s", ", ".join([*written, archive.name]), md_path)
     return contract_c
 
 
