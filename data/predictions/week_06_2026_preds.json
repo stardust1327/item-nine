@@ -1,7 +1,7 @@
 {
   "contract": "B",
   "schema_version": "1.3.0",
-  "generated_at": "2026-10-16T23:16:32Z",
+  "generated_at": "2026-10-17T05:20:22Z",
   "season": 2026,
   "week": 6,
   "model": {
@@ -150,7 +150,7 @@
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.7082,
@@ -214,30 +214,30 @@
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.3884,
-        "away_wp": 0.6116,
+        "home_wp": 0.3945,
+        "away_wp": 0.6055,
         "home_spread": 3.0,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.3011,
         "away_wp": 0.6989
       },
       "final": {
-        "home_wp": 0.3652,
-        "away_wp": 0.6348
+        "home_wp": 0.3697,
+        "away_wp": 0.6303
       },
       "pick": {
         "team": "BAL",
         "side": "away",
-        "win_prob": 0.6348
+        "win_prob": 0.6303
       },
-      "model_edge_pct": 8.73,
+      "model_edge_pct": 9.34,
       "value_team": "BAL",
-      "value_edge_pct": 8.73,
+      "value_edge_pct": 9.34,
       "confidence_tier": "LEAN",
       "top_drivers": [
         {
@@ -284,30 +284,30 @@
       },
       "net_rest_days": -7,
       "market": {
-        "home_wp": 0.3766,
-        "away_wp": 0.6234,
+        "home_wp": 0.392,
+        "away_wp": 0.608,
         "home_spread": 3.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.328,
         "away_wp": 0.672
       },
       "final": {
-        "home_wp": 0.3637,
-        "away_wp": 0.6363
+        "home_wp": 0.375,
+        "away_wp": 0.625
       },
       "pick": {
         "team": "CAR",
         "side": "away",
-        "win_prob": 0.6363
+        "win_prob": 0.625
       },
-      "model_edge_pct": 4.86,
+      "model_edge_pct": 6.4,
       "value_team": "CAR",
-      "value_edge_pct": 4.86,
+      "value_edge_pct": 6.4,
       "confidence_tier": "LEAN",
       "top_drivers": [
         {
@@ -354,30 +354,30 @@
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.487,
-        "away_wp": 0.513,
+        "home_wp": 0.4892,
+        "away_wp": 0.5108,
         "home_spread": 1.25,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.3842,
         "away_wp": 0.6158
       },
       "final": {
-        "home_wp": 0.4597,
-        "away_wp": 0.5403
+        "home_wp": 0.4613,
+        "away_wp": 0.5387
       },
       "pick": {
         "team": "CHI",
         "side": "away",
-        "win_prob": 0.5403
+        "win_prob": 0.5387
       },
-      "model_edge_pct": 10.28,
+      "model_edge_pct": 10.5,
       "value_team": "CHI",
-      "value_edge_pct": 10.28,
+      "value_edge_pct": 10.5,
       "confidence_tier": "COIN FLIP",
       "top_drivers": [
         {
@@ -425,30 +425,30 @@
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.4934,
-        "away_wp": 0.5066,
+        "home_wp": 0.4978,
+        "away_wp": 0.5022,
         "home_spread": 1.25,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.6217,
         "away_wp": 0.3783
       },
       "final": {
-        "home_wp": 0.5275,
-        "away_wp": 0.4725
+        "home_wp": 0.5307,
+        "away_wp": 0.4693
       },
       "pick": {
         "team": "NYG",
         "side": "home",
-        "win_prob": 0.5275
+        "win_prob": 0.5307
       },
-      "model_edge_pct": 12.83,
+      "model_edge_pct": 12.39,
       "value_team": "NYG",
-      "value_edge_pct": 12.83,
+      "value_edge_pct": 12.39,
       "confidence_tier": "COIN FLIP",
       "top_drivers": [
         {
@@ -497,11 +497,11 @@
       "market": {
         "home_wp": 0.7453,
         "away_wp": 0.2547,
-        "home_spread": -7.25,
+        "home_spread": -7.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.7702,
@@ -565,30 +565,30 @@
       },
       "net_rest_days": 3,
       "market": {
-        "home_wp": 0.4355,
-        "away_wp": 0.5645,
+        "home_wp": 0.4291,
+        "away_wp": 0.5709,
         "home_spread": 2.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.5569,
         "away_wp": 0.4431
       },
       "final": {
-        "home_wp": 0.4677,
-        "away_wp": 0.5323
+        "home_wp": 0.4631,
+        "away_wp": 0.5369
       },
       "pick": {
         "team": "PIT",
         "side": "away",
-        "win_prob": 0.5323
+        "win_prob": 0.5369
       },
-      "model_edge_pct": -12.14,
+      "model_edge_pct": -12.78,
       "value_team": "TB",
-      "value_edge_pct": 12.14,
+      "value_edge_pct": 12.78,
       "confidence_tier": "COIN FLIP",
       "top_drivers": [
         {
@@ -635,30 +635,30 @@
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.7405,
-        "away_wp": 0.2595,
+        "home_wp": 0.7409,
+        "away_wp": 0.2591,
         "home_spread": -7.0,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.6492,
         "away_wp": 0.3508
       },
       "final": {
-        "home_wp": 0.7163,
-        "away_wp": 0.2837
+        "home_wp": 0.7165,
+        "away_wp": 0.2835
       },
       "pick": {
         "team": "IND",
         "side": "home",
-        "win_prob": 0.7163
+        "win_prob": 0.7165
       },
-      "model_edge_pct": -9.13,
+      "model_edge_pct": -9.17,
       "value_team": "TEN",
-      "value_edge_pct": 9.13,
+      "value_edge_pct": 9.17,
       "confidence_tier": "LEAN",
       "top_drivers": [
         {
@@ -706,30 +706,30 @@
       },
       "net_rest_days": -1,
       "market": {
-        "home_wp": 0.8564,
-        "away_wp": 0.1436,
+        "home_wp": 0.8542,
+        "away_wp": 0.1458,
         "home_spread": -12.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.7433,
         "away_wp": 0.2567
       },
       "final": {
-        "home_wp": 0.8263,
-        "away_wp": 0.1737
+        "home_wp": 0.8247,
+        "away_wp": 0.1753
       },
       "pick": {
         "team": "LA",
         "side": "home",
-        "win_prob": 0.8263
+        "win_prob": 0.8247
       },
-      "model_edge_pct": -11.31,
+      "model_edge_pct": -11.09,
       "value_team": "ARI",
-      "value_edge_pct": 11.31,
+      "value_edge_pct": 11.09,
       "confidence_tier": "LOCK",
       "top_drivers": [
         {
@@ -774,30 +774,30 @@
       },
       "net_rest_days": 1,
       "market": {
-        "home_wp": 0.3226,
-        "away_wp": 0.6774,
-        "home_spread": 5.0,
+        "home_wp": 0.3215,
+        "away_wp": 0.6785,
+        "home_spread": 4.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.4561,
         "away_wp": 0.5439
       },
       "final": {
-        "home_wp": 0.3581,
-        "away_wp": 0.6419
+        "home_wp": 0.3573,
+        "away_wp": 0.6427
       },
       "pick": {
         "team": "BUF",
         "side": "away",
-        "win_prob": 0.6419
+        "win_prob": 0.6427
       },
-      "model_edge_pct": -13.35,
+      "model_edge_pct": -13.46,
       "value_team": "LV",
-      "value_edge_pct": 13.35,
+      "value_edge_pct": 13.46,
       "confidence_tier": "LEAN",
       "top_drivers": [
         {
@@ -842,30 +842,30 @@
       },
       "net_rest_days": 7,
       "market": {
-        "home_wp": 0.7826,
-        "away_wp": 0.2174,
-        "home_spread": -8.0,
+        "home_wp": 0.7689,
+        "away_wp": 0.2311,
+        "home_spread": -7.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.8546,
         "away_wp": 0.1454
       },
       "final": {
-        "home_wp": 0.8017,
-        "away_wp": 0.1983
+        "home_wp": 0.7917,
+        "away_wp": 0.2083
       },
       "pick": {
         "team": "KC",
         "side": "home",
-        "win_prob": 0.8017
+        "win_prob": 0.7917
       },
-      "model_edge_pct": 7.2,
+      "model_edge_pct": 8.57,
       "value_team": "KC",
-      "value_edge_pct": 7.2,
+      "value_edge_pct": 8.57,
       "confidence_tier": "LOCK",
       "top_drivers": [
         {
@@ -912,30 +912,30 @@
       },
       "net_rest_days": -3,
       "market": {
-        "home_wp": 0.5131,
-        "away_wp": 0.4869,
+        "home_wp": 0.5186,
+        "away_wp": 0.4814,
         "home_spread": -1.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.6711,
         "away_wp": 0.3289
       },
       "final": {
-        "home_wp": 0.5551,
-        "away_wp": 0.4449
+        "home_wp": 0.5591,
+        "away_wp": 0.4409
       },
       "pick": {
         "team": "GB",
         "side": "home",
-        "win_prob": 0.5551
+        "win_prob": 0.5591
       },
-      "model_edge_pct": 15.8,
+      "model_edge_pct": 15.25,
       "value_team": "GB",
-      "value_edge_pct": 15.8,
+      "value_edge_pct": 15.25,
       "confidence_tier": "STAT MISMATCH",
       "top_drivers": [
         {
@@ -982,30 +982,30 @@
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.7748,
-        "away_wp": 0.2252,
+        "home_wp": 0.7746,
+        "away_wp": 0.2254,
         "home_spread": -7.5,
         "source": "odds_api_snapshot",
         "method": "h2h",
         "books": 6,
-        "as_of": "2026-10-16T18:03:46Z"
+        "as_of": "2026-10-17T05:19:59Z"
       },
       "model": {
         "home_wp": 0.8202,
         "away_wp": 0.1798
       },
       "final": {
-        "home_wp": 0.7869,
-        "away_wp": 0.2131
+        "home_wp": 0.7867,
+        "away_wp": 0.2133
       },
       "pick": {
         "team": "SF",
         "side": "home",
-        "win_prob": 0.7869
+        "win_prob": 0.7867
       },
-      "model_edge_pct": 4.54,
+      "model_edge_pct": 4.56,
       "value_team": "SF",
-      "value_edge_pct": 4.54,
+      "value_edge_pct": 4.56,
       "confidence_tier": "LOCK",
       "top_drivers": [
         {

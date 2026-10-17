@@ -372,17 +372,23 @@ def test_app_renders_a_week_and_switches_archives(app_env, contract_b, contract_
     _write(cfg.newsletter_md(2026, 6), "# newsletter\n")
 
     at = _run_app()
-    assert at.title[0].value == "NFL Week 6 Scouting Report — 2026 Season"
+    assert at.title[0].value == "NFL Week 6 — 2026 Season"
     assert at.selectbox[0].options == ["2026 · Week 6", "2026 · Week 5"]
-    assert [h.value for h in at.subheader] == ["Model vs market", "Scouting reports"]
+    assert [t.label for t in at.tabs] == ["Picks", "Model vs market", "Scouting reports"]
+    cards = A.pick_cards(contract_b)
+    assert [m.value for m in at.markdown if m.value.startswith("#### ")] == [
+        f"#### {R.md_text(c.title)}" for c in cards
+    ]
     assert len(at.dataframe) == 1 and len(at.dataframe[0].value) == len(contract_b["games"])
-    assert not at.error and not at.warning  # an all-Gemini run with live data raises no banner
+    assert not at.error
+    # An all-Gemini run raises no banner: the only warnings are pick cards where the stats model disagrees.
+    assert len(at.warning) == sum(c.model_agrees is False for c in cards)
     headlines = [m.value for m in at.markdown if m.value.startswith("##### ")]
-    assert len(headlines) == len(contract_b["games"])
+    assert len(headlines) == len(contract_b["games"])  # one scouting report card per game
 
     at.selectbox[0].select(1).run()
     assert not at.exception
-    assert at.title[0].value == "NFL Week 5 Scouting Report — 2026 Season"
+    assert at.title[0].value == "NFL Week 5 — 2026 Season"
     assert any("Template mode" in w.value for w in at.warning)
 
 
@@ -442,3 +448,91 @@ def test_run_record_reason_text_is_shared_with_the_orchestrator():
     import run_weekly
 
     assert A.DEGRADED_NO_LLM is run_weekly.DEGRADED_NO_LLM
+
+
+# --------------------------------------------------------------------------- #
+# Picks view
+# --------------------------------------------------------------------------- #
+def _game(b: dict[str, Any], *, with_market: bool = True) -> dict[str, Any]:
+    return copy.deepcopy(next(g for g in b["games"] if (g["market"] is not None) == with_market))
+
+
+def _flip(block: dict[str, float], toward: str) -> dict[str, float]:
+    """A {home_wp, away_wp} block that favours ``toward`` ("home" or "away") 60/40."""
+    return {"home_wp": 0.6, "away_wp": 0.4} if toward == "home" else {"home_wp": 0.4, "away_wp": 0.6}
+
+
+def test_pick_card_names_the_winner_and_the_stats_on_each_side(contract_b):
+    for game in contract_b["games"]:
+        card = A.pick_card(game, contract_b)
+        side = game["pick"]["side"]
+        other = game["away_team"] if side == "home" else game["home_team"]
+        pick_name, other_name = R.team_name(game["pick"]["team"]), R.team_name(other)
+        assert card.title == f"{pick_name} over {other_name}"
+        assert card.likelihood == f"{R.pct_text(game['pick']['win_prob'])} likely to win"
+        assert card.details.startswith(f"{A.matchup(game)} · ")
+        drivers = R.game_facts(game, contract_b).sheet["top_drivers"]
+        assert len(card.helping) + len(card.against) == len(drivers)
+        assert all(pick_name in reason for reason in card.helping)
+        assert not any(reason.endswith(f"(favors the {pick_name})") for reason in card.against)
+
+
+def test_pick_card_says_when_the_stats_model_agrees(contract_b):
+    game = _game(contract_b)
+    side = game["pick"]["side"]
+    game["model"] = _flip(game["model"], side)
+    game["market"] |= _flip(game["market"], side)
+    card = A.pick_card(game, contract_b)
+    assert card.model_agrees is True
+    assert card.model_note.startswith("The stats model agrees: it gives the ")
+
+
+def test_pick_card_flags_a_stats_model_that_leans_the_other_way(contract_b):
+    game = _game(contract_b)
+    side = game["pick"]["side"]
+    other_side = "away" if side == "home" else "home"
+    game["model"] = _flip(game["model"], other_side)
+    game["market"] |= _flip(game["market"], side)
+    card = A.pick_card(game, contract_b)
+    other = R.team_name(game[f"{other_side}_team"])
+    assert card.model_agrees is False
+    assert card.model_note.startswith(f"The stats model leans the {other} (60.0%), but the betting market")
+    assert "so they stay the pick" in card.model_note
+
+
+def test_pick_card_when_the_model_carries_the_pick_against_the_market(contract_b):
+    game = _game(contract_b)
+    side = game["pick"]["side"]
+    other_side = "away" if side == "home" else "home"
+    game["model"] = _flip(game["model"], side)
+    game["market"] |= _flip(game["market"], other_side)
+    card = A.pick_card(game, contract_b)
+    assert card.model_agrees is True
+    assert "although the betting market leans the " in card.model_note
+
+
+def test_pick_card_without_a_betting_line(contract_b):
+    card = A.pick_card(_game(contract_b, with_market=False), contract_b)
+    assert card.model_agrees is None
+    assert card.model_note == "There is no betting line for this game, so the pick is the stats model alone."
+
+
+def test_pick_cards_list_upcoming_games_first_then_results(contract_b):
+    b = copy.deepcopy(contract_b)
+    first = min(b["games"], key=lambda g: g["kickoff_utc"])
+    first["status"] = "final"
+    first["result"] = {"home_score": 20, "away_score": 17}
+    cards = A.pick_cards(b)
+    assert [c.played for c in cards] == [False] * (len(cards) - 1) + [True]
+    assert "Final: " in cards[-1].details and "(pick " in cards[-1].details
+    upcoming = sorted((g for g in b["games"] if g is not first), key=lambda g: g["kickoff_utc"])
+    assert [c.details.split(" · ")[0] for c in cards[:-1]] == [A.matchup(g) for g in upcoming]
+
+
+def test_write_up_banners_go_to_the_reports_tab(cfg, contract_b):
+    data = A.WeekData(A.WeekRef(2026, 6), contract_b, _template_c(cfg, contract_b))
+    scopes = {b.title: b.scope for b in A.banners(data, None)}
+    assert scopes["Template mode: write-ups are rule-based, not Gemini"] == "reports"
+    assert scopes["1 game(s) have no market line"] == "page"
+    no_report = A.banners(A.WeekData(A.WeekRef(2026, 6), contract_b, None), None)
+    assert {b.title: b.scope for b in no_report}["No scouting report for this week"] == "reports"

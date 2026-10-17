@@ -349,11 +349,11 @@ class Settings:
             tier_mismatch_max_per_week=mismatch_cap,
             tier_lean_min_win_prob=lean,
             gemini_api_key=_env_str("GEMINI_API_KEY") or _env_str("GOOGLE_API_KEY"),
-            gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash",
+            gemini_model=_env_str("GEMINI_MODEL", "gemini-3.8-flash") or "gemini-3.8-flash",
             llm_temperature=_env_float("LLM_TEMPERATURE", 0.4),
             llm_max_attempts=max(1, _env_int("LLM_MAX_ATTEMPTS", 3)),
             llm_timeout_s=_env_float("LLM_TIMEOUT_S", 60.0),
-            llm_max_concurrency=max(1, _env_int("LLM_MAX_CONCURRENCY", 4)),
+            llm_max_concurrency=max(1, _env_int("LLM_MAX_CONCURRENCY", 2)),  # free-tier per-minute limit trips at 4
             llm_thinking_budget=_env_int("GEMINI_THINKING_BUDGET", -1) if _env_str("GEMINI_THINKING_BUDGET") else None,
             log_level=(_env_str("LOG_LEVEL", "INFO") or "INFO").upper(),
         )

@@ -3,7 +3,7 @@
 Pipeline
     1. Read and validate ``data/predictions/current_week.json`` (Contract B).
     2. For each game, build a compact *fact sheet* from the payload and ask Gemini
-       (``google-genai``, default ``gemini-2.5-flash``) for a JSON scouting report.
+       (``google-genai``, default ``gemini-3.8-flash``) for a JSON scouting report.
     3. Validate the reply with :class:`ScoutingReport` (Pydantic v2). That checks
        ``headline``, ``the_pick_summary``, ``key_mismatch`` and ``risk_factor`` for
        length and formatting, and checks grounding against the fact sheet: every

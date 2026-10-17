@@ -294,10 +294,10 @@ def _api_error(cls: type, code: int, status: str, message: str, **extra: Any) ->
 def test_gemini_writer_requests_json_with_schema(cfg):
     client = _FakeClient('{"headline": "ok"}')
     writer = R.GeminiReportWriter(cfg=cfg, client=client)
-    assert writer.name == "gemini-2.5-flash"
+    assert writer.name == "gemini-3.8-flash"
     assert writer.complete(R.SYSTEM_INSTRUCTION, "prompt") == '{"headline": "ok"}'
     call = client.models.calls[0]
-    assert call["model"] == "gemini-2.5-flash"
+    assert call["model"] == "gemini-3.8-flash"
     assert call["config"].response_mime_type == "application/json"
     assert call["config"].response_schema is R._ResponseSchema
     assert call["config"].system_instruction == R.SYSTEM_INSTRUCTION
