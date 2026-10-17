@@ -1,14 +1,14 @@
 {
   "record": "run",
   "schema_version": "1.0.0",
-  "started_at": "2026-10-16T23:16:32Z",
-  "finished_at": "2026-10-16T23:16:33Z",
+  "started_at": "2026-10-17T05:20:21Z",
+  "finished_at": "2026-10-17T05:22:09Z",
   "options": {
     "season": null,
     "week": null,
     "use_cached_odds": true,
-    "skip_llm": true,
-    "skip_ingest": true,
+    "skip_llm": false,
+    "skip_ingest": false,
     "backtest": false
   },
   "season": 2026,
@@ -21,27 +21,27 @@
   "stages": [
     {
       "name": "ingest",
-      "status": "skipped",
-      "seconds": 0.0,
-      "detail": "--skip-ingest: cached nflverse data used as-is"
+      "status": "ok",
+      "seconds": 0.01,
+      "detail": "schedules + pbp 2016-2026"
     },
     {
       "name": "features",
       "status": "ok",
-      "seconds": 0.3,
+      "seconds": 0.33,
       "detail": "3,033 games (192 without a result)"
     },
     {
       "name": "model",
       "status": "ok",
-      "seconds": 0.31,
+      "seconds": 0.45,
       "detail": "14 games | market 13 odds_api_snapshot, 1 nflverse_close | tiers 4 LOCK, 2 STAT MISMATCH, 5 LEAN, 3 COIN FLIP"
     },
     {
       "name": "report",
       "status": "ok",
-      "seconds": 0.07,
-      "detail": "14 template reports (--skip-llm)"
+      "seconds": 106.46,
+      "detail": "13 gemini-3.8-flash / 1 template"
     }
   ],
   "outputs": [
