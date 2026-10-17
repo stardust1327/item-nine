@@ -91,6 +91,7 @@ class Banner:
     level: Literal["error", "warning", "info"]
     title: str
     lines: tuple[str, ...] = ()
+    scope: Literal["page", "reports"] = "page"  # "reports": about the write-ups, shown in the Scouting reports tab
 
 
 def _read_json(path: Path) -> Any:
@@ -207,6 +208,7 @@ def banners(data: WeekData, record: dict[str, Any] | None) -> list[Banner]:
                 "warning",
                 "No scouting report for this week",
                 ("Predictions only. Run `python run_weekly.py` (or `python -m src.report_generator`) for write-ups.",),
+                scope="reports",
             )
         )
     else:
@@ -219,6 +221,7 @@ def banners(data: WeekData, record: dict[str, Any] | None) -> list[Banner]:
                         f"Write-ups were built from predictions made {fmt_time(c['source']['generated_at'])}; the "
                         f"probabilities shown were made {fmt_time(b['generated_at'])}. Re-run the report stage.",
                     ),
+                    scope="reports",
                 )
             )
         summary = c["summary"]
@@ -228,6 +231,7 @@ def banners(data: WeekData, record: dict[str, Any] | None) -> list[Banner]:
                     "warning",
                     "Template mode: write-ups are rule-based, not Gemini",
                     ("The report stage ran with --skip-llm / --template.",),
+                    scope="reports",
                 )
             )
         elif summary["n_llm"] and summary["n_template"]:
@@ -236,6 +240,7 @@ def banners(data: WeekData, record: dict[str, Any] | None) -> list[Banner]:
                     "warning",
                     f"{summary['n_template']} of {summary['n_games']} write-ups fell back to the template",
                     ("Gemini's replies for those games failed validation; see each card for the reason.",),
+                    scope="reports",
                 )
             )
     no_line = [g for g in b["games"] if g["market"] is None]
@@ -398,6 +403,77 @@ def probability_chart(contract_b: dict[str, Any], mode: str = "light") -> Any:
     return alt.layer(fifty, gap, dots).properties(height=30 * len(order) + 40)
 
 
+@dataclass(frozen=True, slots=True)
+class PickCard:
+    """The simple view of one game: the most likely winner, why, and whether the stats model agrees."""
+
+    title: str  # "Pittsburgh Steelers over Tampa Bay Buccaneers"
+    likelihood: str  # "53.2% likely to win"
+    details: str  # matchup, kickoff and, once played, the result
+    helping: tuple[str, ...]  # top stats in the winner's favour
+    against: tuple[str, ...]  # top stats in the opponent's favour
+    model_note: str
+    model_agrees: bool | None  # None: no betting line, so the pick is the stats model alone
+    played: bool
+
+
+def _reason(driver: dict[str, str]) -> str:
+    text = f"{driver['stat']}: {driver['value']}"
+    return text if driver["favors"] in driver["value"] else f"{text} (favors the {driver['favors']})"
+
+
+def pick_card(game: dict[str, Any], contract_b: dict[str, Any]) -> PickCard:
+    """Who will most likely win, from the final (market-led) probability, and why, from the stats model's drivers."""
+    side = game["pick"]["side"]
+    pick, other = (game["home_team"], game["away_team"]) if side == "home" else (game["away_team"], game["home_team"])
+    pick_name, other_name = R.team_name(pick), R.team_name(other)
+    drivers = R.game_facts(game, contract_b).sheet["top_drivers"]
+    model_pick, market_pick = pick_side(game, game["model"]), pick_side(game, game["market"])
+    other_side = "away" if side == "home" else "home"
+    if market_pick is None:
+        agrees: bool | None = None
+        note = "There is no betting line for this game, so the pick is the stats model alone."
+    elif model_pick >= 0.5 and market_pick >= 0.5:
+        agrees = True
+        note = (
+            f"The stats model agrees: it gives the {pick_name} {R.pct_text(model_pick)}, and the betting market "
+            f"{R.pct_text(market_pick)}."
+        )
+    elif model_pick >= 0.5:
+        agrees = True
+        note = (
+            f"The stats model ({R.pct_text(model_pick)}) makes the {pick_name} the pick, although the betting market "
+            f"leans the {other_name} ({R.pct_text(game['market'][f'{other_side}_wp'])})."
+        )
+    else:
+        agrees = False
+        note = (
+            f"The stats model leans the {other_name} ({R.pct_text(game['model'][f'{other_side}_wp'])}), but the "
+            f"betting market, which has been the more accurate forecaster, favors the {pick_name} "
+            f"({R.pct_text(market_pick)}), so they stay the pick."
+        )
+    played = game["status"] == "final"
+    details = f"{matchup(game)} · {R.local_kickoff(game['kickoff_utc'])}"
+    if played:
+        details += f" · Final: {R.result_text(game)}"
+    return PickCard(
+        title=f"{pick_name} over {other_name}",
+        likelihood=f"{R.pct_text(game['pick']['win_prob'])} likely to win",
+        details=details,
+        helping=tuple(_reason(d) for d in drivers if d["favors"] == pick_name),
+        against=tuple(_reason(d) for d in drivers if d["favors"] != pick_name),
+        model_note=note,
+        model_agrees=agrees,
+        played=played,
+    )
+
+
+def pick_cards(contract_b: dict[str, Any]) -> list[PickCard]:
+    """Upcoming games in kickoff order, then games already played."""
+    games = sorted(contract_b["games"], key=lambda g: (g["status"] == "final", g["kickoff_utc"], g["game_id"]))
+    return [pick_card(g, contract_b) for g in games]
+
+
 def write_up_meta(game: dict[str, Any]) -> str:
     meta = game["report_meta"]
     if meta["generator"] != R.TEMPLATE_GENERATOR:
@@ -427,18 +503,38 @@ def _render_banners(st: Any, items: list[Banner]) -> None:
 
 
 def _render_header(st: Any, data: WeekData, warnings: list[Banner]) -> None:
-    """Title, then the warning banners (so a degraded or template run is the first thing a reader sees), then
-    the run metadata."""
-    b, c = data.contract_b, data.contract_c
+    """Title, then the page-wide banners, so an error or a degraded run is the first thing a reader sees."""
+    b = data.contract_b
     assert b is not None
-    st.title(f"NFL {R.week_label(b)} Scouting Report — {b['season']} Season")
-    _render_banners(st, warnings)
-    tiers = Counter(g["confidence_tier"] for g in b["games"])
+    st.title(f"NFL {R.week_label(b)} — {b['season']} Season")
+    _render_banners(st, [w for w in warnings if w.scope == "page"])
+    st.caption(f"The most likely winner of each of the {len(b['games'])} games, and the stats behind it.")
+
+
+def _render_picks(st: Any, b: dict[str, Any]) -> None:
+    cards = pick_cards(b)
+    for n, card in enumerate(cards):
+        if card.played and (n == 0 or not cards[n - 1].played):
+            st.markdown("##### Already played")
+        with st.container(border=True):
+            st.markdown(f"#### {R.md_text(card.title)}")
+            st.markdown(f"**{card.likelihood}** · {R.md_text(card.details)}")
+            if card.helping:
+                st.markdown("**Why:**\n" + "\n".join(f"- {R.md_text(r)}" for r in card.helping))
+            if card.against:
+                st.markdown("**Working against them:**\n" + "\n".join(f"- {R.md_text(r)}" for r in card.against))
+            note = st.caption if card.model_agrees is not False else st.warning
+            note(R.md_text(card.model_note))
     st.caption(
-        f"{len(b['games'])} games · "
-        + " · ".join(f"{tiers[t]} {t}" for t in M.TIERS if tiers[t])
-        + " · win probabilities are a calibrated XGBoost model blended with the de-vigged market. Not betting advice."
+        "Win chances blend the betting market (which has been the more accurate forecaster) with our play-by-play "
+        "stats model; the reasons are the stats that moved the model most. EPA is expected points added per play; "
+        "success rate is the share of plays that keep an offense on schedule. Not betting advice."
     )
+
+
+def _render_run_info(st: Any, b: dict[str, Any], c: dict[str, Any] | None) -> None:
+    tiers = Counter(g["confidence_tier"] for g in b["games"])
+    st.caption(" · ".join(f"{tiers[t]} {M.TIER_LABELS[t]}" for t in M.TIERS if tiers[t]))
     markets = market_summary(b)
     tiles = [
         ("Predictions made", fmt_time(b["generated_at"], year=False)),
@@ -452,7 +548,6 @@ def _render_header(st: Any, data: WeekData, warnings: list[Banner]) -> None:
 
 
 def _render_overview(st: Any, b: dict[str, Any]) -> None:
-    st.subheader("Model vs market")
     mode = getattr(getattr(st.context, "theme", None), "type", None) or "light"
     st.altair_chart(probability_chart(b, mode), width="stretch")
     st.caption(
@@ -476,7 +571,6 @@ def _render_overview(st: Any, b: dict[str, Any]) -> None:
 
 
 def _render_cards(st: Any, c: dict[str, Any]) -> None:
-    st.subheader("Scouting reports")
     present = [t for t in M.TIERS if any(g["confidence_tier"] == t for g in c["games"])]
     chosen = (
         st.pills("Tiers", present, selection_mode="multi", default=present, format_func=M.TIER_LABELS.get, key="tiers")
@@ -567,11 +661,20 @@ def main() -> None:
         _render_banners(st, banners(data, record))
         return
 
-    _render_header(st, data, banners(data, record))
-    _render_overview(st, data.contract_b)
-    if data.contract_c is not None:
-        _render_cards(st, data.contract_c)
-    _render_details(st, cfg, data.contract_b, data.contract_c)
+    items = banners(data, record)
+    b, c = data.contract_b, data.contract_c
+    _render_header(st, data, items)
+    picks_tab, market_tab, reports_tab = st.tabs(["Picks", "Model vs market", "Scouting reports"])
+    with picks_tab:
+        _render_picks(st, b)
+    with market_tab:
+        _render_run_info(st, b, c)
+        _render_overview(st, b)
+        _render_details(st, cfg, b, c)
+    with reports_tab:
+        _render_banners(st, [i for i in items if i.scope == "reports"])
+        if c is not None:
+            _render_cards(st, c)
 
 
 if __name__ == "__main__":

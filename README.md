@@ -146,6 +146,11 @@ If a stage fails, the run stops and later stages don't run. It then prints a sta
   - Errors: unreadable files, a failed last run, a degraded run.
   - Warnings: no report yet, write-ups older than the predictions, template mode, Gemini fallbacks.
   - Info: games without a market line.
+- **Picks tab (default):** one card per game, with:
+  - the most likely winner and its chance to win
+  - **why:** the stats in its favor and the ones working against it
+  - whether the stats model agrees. When it leans the other team, the card says so, and the betting market, which has been the more accurate forecaster, decides the pick.
+- **Model vs market tab:** the run details, chart and table described below.
 - **Metadata row:** prediction time, odds source with its snapshot time, market weight, and who wrote the write-ups.
 - **Chart:** model vs market, as a dot plot of each pick's win probability. Market and model are dots and the blend is a diamond.
 - **Table:** the same values per game, with edge, tier and result.

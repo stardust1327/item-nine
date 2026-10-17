@@ -258,6 +258,11 @@ the exit code.
     finished_at`. An all-template LLM report is also degraded.
   - **Warnings:** no report yet; write-ups older than the predictions; template mode; partial template fallback.
   - **Info:** games without a market line.
+- **Tabs.** **Picks** (the default) gives one card per game, upcoming games first. Each card has the most likely winner
+  and its final win probability, then the top stats for and against it (`top_drivers`, in plain English). It ends with
+  whether the stats model agrees: when the model leans the other team, the card says so, and that the market-led
+  blend decides the pick. **Model vs market** has the run metadata, chart, table and model details. **Scouting reports**
+  has the write-up banners (scope `reports`) and the Contract C cards.
 - **Display.** The chart and table show pick-side probabilities, truncated like the newsletter. Chart colors are
   categorical slots 1–2 of the dataviz reference palette, validated in light and dark mode. Every value in the chart is
   also in the table.
