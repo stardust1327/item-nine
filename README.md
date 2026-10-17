@@ -85,7 +85,7 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
 
 ## Scouting reports
 
-`python -m src.report_generator` turns Contract B into prose with Gemini (`google-genai`, default `gemini-2.5-flash`, key `GEMINI_API_KEY`). `--template` skips the LLM.
+`python -m src.report_generator` turns Contract B into prose with Gemini (`google-genai`, default `gemini-3.8-flash`, key `GEMINI_API_KEY`). `--template` skips the LLM.
 
 - **Validation.** Each game's report is checked by a Pydantic model with four required fields: `headline`, `the_pick_summary`, `key_mismatch` and `risk_factor`. It must be plain prose, and it is grounded against that game's fact sheet:
   - it names the pick, its tier and its final win probability

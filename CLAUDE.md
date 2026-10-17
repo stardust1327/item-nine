@@ -81,7 +81,7 @@ them elsewhere.
 - **Data:** `polars`, with Parquet via `pyarrow`.
 - **ML:** `xgboost`, `scikit-learn` (`CalibratedClassifierCV`, `brier_score_loss`, `log_loss`) and `scipy.optimize`.
   Drivers are SHAP values from XGBoost's native TreeSHAP (`pred_contribs`).
-- **LLM:** `google-genai`, default model `gemini-2.5-flash`. All output is validated with `pydantic>=2`.
+- **LLM:** `google-genai`, default model `gemini-3.8-flash`. All output is validated with `pydantic>=2`.
 - **Frontend:** `streamlit`. **Tests:** `pytest`.
 - **Secrets:** `.env`, which is git-ignored, holds `ODDS_API_KEY` and `GEMINI_API_KEY`. Never commit, print or log keys;
   the Odds API client redacts them from errors.
@@ -295,14 +295,14 @@ All settings live in `config.Settings`, populated from the environment or `.env`
 |---|---|---|
 | `ODDS_API_KEY` | — | Required for live odds |
 | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | — | Required for LLM reports |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model |
 | `NFL_STAT_MISMATCH_MIN_PCT` | `8.0` | STAT MISMATCH threshold: \|model − market\| on the pick, in percentage points |
 | `NFL_STAT_MISMATCH_MAX_PER_WEEK` | `2` | STAT MISMATCH games per week, largest gaps first (0 turns the tier off) |
 | `NFL_TIER_LOCK_MIN_WIN_PROB` | `0.75` | LOCK threshold |
 | `NFL_TIER_LEAN_MIN_WIN_PROB` | `0.55` | LEAN threshold |
 | `NFL_START_SEASON` | `2016` | First cached season |
 | `ODDS_BOOKMAKERS` | 8 major US books | Books used for the consensus (≤ 10 books counts as 1 region of credits) |
-| `LLM_MAX_ATTEMPTS`, `LLM_TEMPERATURE`, `LLM_MAX_CONCURRENCY`, `GEMINI_THINKING_BUDGET` | 3, 0.4, 4, model default | Generation controls |
+| `LLM_MAX_ATTEMPTS`, `LLM_TEMPERATURE`, `LLM_MAX_CONCURRENCY`, `GEMINI_THINKING_BUDGET` | 3, 0.4, 2, model default | Generation controls (2 concurrent requests stays under free-tier per-minute limits) |
 | `NFL_DATA_DIR`, `NFL_REPORTS_DIR`, `NFL_MODELS_DIR`, `NFL_LOGS_DIR` | Under the repo | Path overrides (the dashboard reads them on every rerun) |
 
 ## 8. Commands and exit codes
