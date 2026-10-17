@@ -127,7 +127,7 @@ def _iso_z(ts: datetime) -> str:
     return ts.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _atomic_write_parquet(df: pl.DataFrame, path: Path) -> None:
+def write_parquet_atomic(df: pl.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
     os.close(fd)
@@ -140,7 +140,7 @@ def _atomic_write_parquet(df: pl.DataFrame, path: Path) -> None:
         raise
 
 
-def _atomic_write_text(text: str, path: Path) -> None:
+def write_text_atomic(text: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
     try:
@@ -243,7 +243,7 @@ class CacheManifest:
             "updated_at": utc_now().isoformat(),
             "entries": {key: entry.to_dict() for key, entry in sorted(self._entries.items())},
         }
-        _atomic_write_text(json.dumps(payload, indent=2), self.path)
+        write_text_atomic(json.dumps(payload, indent=2), self.path)
 
 
 # --------------------------------------------------------------------------- #
@@ -421,7 +421,7 @@ class NflverseCache:
         self, spec: DatasetSpec, season: int | None, df: pl.DataFrame, *, fetched_at: datetime, final: bool
     ) -> CacheEntry:
         path = self.path_for(spec.name, season)
-        _atomic_write_parquet(df, path)
+        write_parquet_atomic(df, path)
         entry = CacheEntry(
             dataset=spec.name,
             season=season,
@@ -1196,10 +1196,10 @@ def _save_odds_snapshot(book_odds: pl.DataFrame, consensus: pl.DataFrame, fetche
         folder, stem = cfg.odds_dir / str(season), f"odds_{season}_wk{week:02d}_{stamp}"
     else:
         folder, stem = cfg.odds_dir / "unmatched", f"odds_upcoming_{stamp}"
-    _atomic_write_parquet(
+    write_parquet_atomic(
         book_odds.with_columns(pl.lit(fetched_at).alias("fetched_at")), folder / f"{stem}_books.parquet"
     )
-    _atomic_write_parquet(consensus, folder / f"{stem}_consensus.parquet")
+    write_parquet_atomic(consensus, folder / f"{stem}_consensus.parquet")
     logger.info("Saved odds snapshot %s/%s_*.parquet", folder, stem)
 
 
