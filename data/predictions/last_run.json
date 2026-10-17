@@ -1,0 +1,55 @@
+{
+  "record": "run",
+  "schema_version": "1.0.0",
+  "started_at": "2026-10-16T23:16:32Z",
+  "finished_at": "2026-10-16T23:16:33Z",
+  "options": {
+    "season": null,
+    "week": null,
+    "use_cached_odds": true,
+    "skip_llm": true,
+    "skip_ingest": true,
+    "backtest": false
+  },
+  "season": 2026,
+  "week": 6,
+  "is_current": true,
+  "exit_code": 0,
+  "status": "ok",
+  "degraded": [],
+  "error": null,
+  "stages": [
+    {
+      "name": "ingest",
+      "status": "skipped",
+      "seconds": 0.0,
+      "detail": "--skip-ingest: cached nflverse data used as-is"
+    },
+    {
+      "name": "features",
+      "status": "ok",
+      "seconds": 0.3,
+      "detail": "3,033 games (192 without a result)"
+    },
+    {
+      "name": "model",
+      "status": "ok",
+      "seconds": 0.31,
+      "detail": "14 games | market 13 odds_api_snapshot, 1 nflverse_close | tiers 4 LOCK, 2 STAT MISMATCH, 5 LEAN, 3 COIN FLIP"
+    },
+    {
+      "name": "report",
+      "status": "ok",
+      "seconds": 0.07,
+      "detail": "14 template reports (--skip-llm)"
+    }
+  ],
+  "outputs": [
+    "data/processed/features.parquet",
+    "data/predictions/current_week.json",
+    "data/predictions/week_06_2026_preds.json",
+    "data/predictions/weekly_report_enriched.json",
+    "data/predictions/week_06_2026_enriched.json",
+    "reports/week_06_2026.md"
+  ]
+}

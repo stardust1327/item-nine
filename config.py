@@ -178,6 +178,7 @@ class Settings:
     processed_dir: Path
     models_dir: Path
     logs_dir: Path
+    reports_dir: Path  # weekly Markdown newsletters
 
     # Seasons
     start_season: int
@@ -209,7 +210,8 @@ class Settings:
 
     # Confidence tiers (Contract B). Stored in each payload, which is validated against its own thresholds.
     tier_lock_min_win_prob: float  # LOCK: pick's final win probability at least this (and the model favours it)
-    tier_value_edge_min_pct: float  # VALUE EDGE: model at least this many points above the market on the pick
+    tier_mismatch_min_pct: float  # STAT MISMATCH: |model - market| on the pick at least this many points
+    tier_mismatch_max_per_week: int  # STAT MISMATCH: at most this many games per week (largest gaps first)
     tier_lean_min_win_prob: float  # LEAN: pick's final win probability at least this
 
     # LLM scouting reports (google-genai)
@@ -248,6 +250,11 @@ class Settings:
     def enriched_report_json(self) -> Path:
         return self.predictions_dir / "weekly_report_enriched.json"
 
+    @property
+    def last_run_json(self) -> Path:
+        """Run record of the last ``run_weekly.py`` run (stages, exit code, degraded reasons)."""
+        return self.predictions_dir / "last_run.json"
+
     def preds_archive_json(self, season: int, week: int) -> Path:
         """Versioned Contract B for one week: data/predictions/week_XX_YYYY_preds.json."""
         return self.predictions_dir / f"week_{week:02d}_{season}_preds.json"
@@ -259,10 +266,6 @@ class Settings:
     def newsletter_md(self, season: int, week: int) -> Path:
         """Weekly newsletter: reports/week_XX_YYYY.md (season in the name, so seasons never overwrite each other)."""
         return self.reports_dir / f"week_{week:02d}_{season}.md"
-
-    @property
-    def reports_dir(self) -> Path:
-        return self.project_root / "reports"
 
     def dataset_dir(self, name: str) -> Path:
         return self.raw_dir / name
@@ -297,12 +300,14 @@ class Settings:
         if start_season < 1999:
             raise ValueError(f"NFL_START_SEASON must be >= 1999 (first nflverse pbp season), got {start_season}")
         lock = _env_float("NFL_TIER_LOCK_MIN_WIN_PROB", 0.75)
-        value_edge = _env_float("NFL_VALUE_EDGE_MIN_PCT", 8.0)
+        mismatch = _env_float("NFL_STAT_MISMATCH_MIN_PCT", 8.0)
+        mismatch_cap = _env_int("NFL_STAT_MISMATCH_MAX_PER_WEEK", 2)
         lean = _env_float("NFL_TIER_LEAN_MIN_WIN_PROB", 0.55)
-        if not (0.5 <= lean <= lock <= 1.0) or not (0.0 < value_edge <= 100.0):
+        if not (0.5 <= lean <= lock <= 1.0) or not (0.0 < mismatch <= 100.0) or mismatch_cap < 0:
             raise ValueError(
                 "Tier thresholds need 0.5 <= NFL_TIER_LEAN_MIN_WIN_PROB <= NFL_TIER_LOCK_MIN_WIN_PROB <= 1 "
-                f"and 0 < NFL_VALUE_EDGE_MIN_PCT <= 100; got lean={lean}, lock={lock}, value_edge={value_edge}"
+                f"and 0 < NFL_STAT_MISMATCH_MIN_PCT <= 100 and NFL_STAT_MISMATCH_MAX_PER_WEEK >= 0; got lean={lean}, "
+                f"lock={lock}, mismatch={mismatch}, max_per_week={mismatch_cap}"
             )
         weekday = _env_int("NFL_WEEKLY_REFRESH_WEEKDAY", 1)
         hour = _env_int("NFL_WEEKLY_REFRESH_HOUR_UTC", 12)
@@ -317,6 +322,7 @@ class Settings:
             processed_dir=data_dir / "processed",
             models_dir=_env_path("NFL_MODELS_DIR", root / "models"),
             logs_dir=_env_path("NFL_LOGS_DIR", root / "logs"),
+            reports_dir=_env_path("NFL_REPORTS_DIR", root / "reports"),
             start_season=start_season,
             nflverse_timeout_s=_env_int("NFLVERSE_TIMEOUT_S", 120),
             nflverse_max_retries=max(1, _env_int("NFLVERSE_MAX_RETRIES", 3)),
@@ -339,7 +345,8 @@ class Settings:
             odds_consensus_method=method,  # type: ignore[arg-type]
             spread_margin_sigma=_env_float("NFL_SPREAD_MARGIN_SIGMA", 13.45),
             tier_lock_min_win_prob=lock,
-            tier_value_edge_min_pct=value_edge,
+            tier_mismatch_min_pct=mismatch,
+            tier_mismatch_max_per_week=mismatch_cap,
             tier_lean_min_win_prob=lean,
             gemini_api_key=_env_str("GEMINI_API_KEY") or _env_str("GOOGLE_API_KEY"),
             gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash",

@@ -1,0 +1,130 @@
+name: CI and weekly report
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "NFL season (blank: the season of the next game)"
+        required: false
+        default: ""
+      week:
+        description: "Week (blank: the current week; a past week is replayed)"
+        required: false
+        default: ""
+      use_cached_odds:
+        description: "Skip The Odds API (uses no credits)"
+        type: boolean
+        default: false
+      skip_llm:
+        description: "Skip Gemini (rule-based template write-ups)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 13 * * 2" # Tuesday 13:00 UTC: Monday Night Football is processed upstream; new week's lines are up
+    - cron: "0 21 * * 5" # Friday 21:00 UTC: refresh lines and injuries-driven moves before Sunday
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Tests
+        run: python -m pytest -q
+
+  weekly_report:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # commit the new predictions and newsletter
+    concurrency:
+      group: weekly-report
+      cancel-in-progress: false
+    env:
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # The nflverse cache (~135 MB) and saved Odds API snapshots carry over between runs, so each run only
+      # downloads what is stale and --use-cached-odds has snapshots to fall back on.
+      - name: Restore the raw data cache
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: nflverse-raw-${{ github.run_id }}
+          restore-keys: nflverse-raw-
+
+      - name: Run the weekly pipeline
+        id: run
+        env:
+          SEASON: ${{ inputs.season }}
+          WEEK: ${{ inputs.week }}
+          USE_CACHED_ODDS: ${{ inputs.use_cached_odds }}
+          SKIP_LLM: ${{ inputs.skip_llm }}
+        run: |
+          args=(--backtest)
+          if [ -n "$SEASON" ]; then args+=(--season "$SEASON"); fi
+          if [ -n "$WEEK" ]; then args+=(--week "$WEEK"); fi
+          if [ "$USE_CACHED_ODDS" = "true" ]; then args+=(--use-cached-odds); fi
+          if [ "$SKIP_LLM" = "true" ]; then args+=(--skip-llm); fi
+          echo "python run_weekly.py ${args[*]}"
+          set +e
+          python run_weekly.py "${args[@]}"
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      # Exit 0 and 3 wrote new outputs; 1 and 2 still wrote last_run.json, which the dashboard shows as a banner.
+      - name: Commit the predictions and newsletter
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/predictions reports
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit"
+            exit 0
+          fi
+          target=$(python -c "import json; r = json.load(open('data/predictions/last_run.json')); print(f\"{r['season']} week {r['week']}\" if r['season'] else 'no target week')")
+          git commit -m "Weekly report: $target (run_weekly exit ${{ steps.run.outputs.exit_code }})"
+          for attempt in 1 2 3; do
+            if git pull --rebase && git push; then exit 0; fi
+            sleep $((attempt * 5))
+          done
+          echo "::error title=Push failed::Could not push the weekly report (is main protected against bot pushes?)"
+          exit 1
+
+      - name: Report the outcome
+        env:
+          CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          case "$CODE" in
+            0) echo "Weekly run OK" ;;
+            3) echo "::warning title=Degraded weekly run::Outputs were written, but a live input was not used. See data/predictions/last_run.json." ;;
+            2) echo "::error title=Missing API key::Add ODDS_API_KEY and GEMINI_API_KEY under Settings > Secrets and variables > Actions, or run with use_cached_odds / skip_llm."; exit 1 ;;
+            *) echo "::error title=Weekly run failed::run_weekly.py exited $CODE. See the log and data/predictions/last_run.json."; exit 1 ;;
+          esac

@@ -6,7 +6,6 @@ import copy
 import dataclasses
 import json
 import re
-import threading
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +16,7 @@ from pydantic import ValidationError
 from config import Settings, settings
 from src import model as M
 from src import report_generator as R
+from tests.fakes import GroundedWriter
 
 NOW = datetime(2026, 10, 16, 18, 0, tzinfo=UTC)
 
@@ -83,38 +83,6 @@ class ScriptedWriter:
         if isinstance(item, Exception):
             raise item
         return item(prompt) if callable(item) else item
-
-
-class GroundedWriter:
-    """Thread-safe fake LLM that writes a grounded report from the fact sheet in the prompt."""
-
-    name = "fake-gemini"
-
-    def __init__(self) -> None:
-        self.calls = 0
-        self._lock = threading.Lock()
-
-    def complete(self, system_instruction: str, prompt: str) -> str:
-        with self._lock:
-            self.calls += 1
-        assert system_instruction == R.SYSTEM_INSTRUCTION
-        sheet = json.loads(prompt.split("FACT SHEET (JSON):\n", 1)[1].split("\n\nYour previous", 1)[0])
-        pick = sheet["pick"]
-        return json.dumps(
-            {
-                "headline": f"{pick['team']} ({pick['abbr']}) carry the edge into kickoff",
-                "the_pick_summary": (
-                    f"The blended forecast picks the {pick['team']} at {pick['final_win_probability_pct']}% "
-                    f"({sheet['confidence_tier']})."
-                ),
-                "key_mismatch": (
-                    f"{sheet['top_drivers'][0]['stat']} favors the {sheet['top_drivers'][0]['favors']}."
-                    if sheet["top_drivers"]
-                    else "No single statistic separates these teams this week."
-                ),
-                "risk_factor": f"The opponent still wins {pick['opponent_win_probability_pct']}% of the time.",
-            }
-        )
 
 
 # --------------------------------------------------------------------------- #
@@ -454,7 +422,7 @@ def test_run_report_writes_contract_c_and_newsletter(payload, cfg):
         assert f"{game['away_team']} @ {game['home_team']} — {game['report']['headline']}" in md
         assert game["report"]["the_pick_summary"] in md
     for tier in {g["confidence_tier"] for g in contract_c["games"]}:
-        assert re.search(rf"^## {tier.title()}s$", md, re.MULTILINE)
+        assert re.search(rf"^## {re.escape(R.SECTION_TITLES[tier])}$", md, re.MULTILINE)
     assert "Brier score model 0.2329" in md and "Not betting advice" in md
 
 
@@ -603,11 +571,11 @@ def test_display_values_never_cross_tier_thresholds():  # C2
 
 def test_writer_label_reflects_actual_generation(payload, cfg):  # C5
     all_failed = R.enrich_payload(payload, ScriptedWriter(R.LLMRequestError("HTTP 503")), cfg=cfg, now=NOW)
-    assert R._writer_label(all_failed) == "rule-based templates (Gemini unavailable)"
+    assert R.writer_label(all_failed) == "rule-based templates (Gemini unavailable)"
     assert "write-ups: rule-based templates (Gemini unavailable)" in R.render_newsletter(all_failed)
     mixed = copy.deepcopy(all_failed)
     mixed["summary"].update(n_llm=5, n_template=len(payload["games"]) - 5)
-    assert R._writer_label(mixed).startswith("fake-gemini for 5 of")
+    assert R.writer_label(mixed).startswith("fake-gemini for 5 of")
 
 
 def test_run_wide_errors_abort_without_writing(payload, cfg):  # runtime F1
@@ -688,7 +656,7 @@ def test_playoff_titles_and_track_record_follow_the_data(payload, cfg):  # contr
             "final": {"brier": 0.205, "n_games": 9},
         },
     }
-    assert "The model has been the most accurate" in R._track_record(model_wins, 0.3)
+    assert "The model has been the most accurate" in R.track_record(model_wins, 0.3)
 
 
 def test_main_exit_codes(payload, cfg, monkeypatch):  # degraded runs are visible to orchestration
