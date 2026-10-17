@@ -4,34 +4,29 @@ NFL Game Prediction Engine and Weekly Scouting Report web app (Python 3.11+).
 
 ## Project layout
 
-Implemented so far: `config.py`, `src/ingest.py`, `src/features.py`, `src/model.py` and their tests. Everything else in the tree below is the planned layout.
+The layout follows CLAUDE.md §3. Implemented so far: `config.py`, `src/ingest.py`, `src/features.py`, `src/model.py`, `src/report_generator.py` and their tests. `run_weekly.py` and `app.py` are planned.
 
 ```
 item-nine/
-├── config.py                  # all settings: paths, seasons, cache policy, Odds API, logging
+├── CLAUDE.md                  # authoritative spec: invariants, Contracts A/B/C, env, exit codes
+├── config.py                  # all settings: paths, seasons, cache policy, API keys, logging
 ├── requirements.txt
 ├── pyproject.toml             # pytest + ruff config
-├── .env.example               # ODDS_API_KEY and optional overrides
-├── src/
-│   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache)
-│   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
-│   ├── model.py               # walk-forward XGBoost + sigmoid calibration + market blend -> current_week.json
-│   ├── market/
-│   │   └── edges.py           # model vs. market_home_wp, fractional Kelly sizing
-│   └── reports/
-│       └── scouting.py        # weekly matchup report payloads
-├── app/
-│   ├── streamlit_app.py       # `streamlit run app/streamlit_app.py`
-│   └── pages/                 # Weekly Picks, Scouting Report, Model Diagnostics, Data Health
+├── .env.example               # ODDS_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY + optional overrides
+├── run_weekly.py              # (planned) end-to-end CLI orchestrator
+├── app.py                     # (planned) Streamlit dashboard
 ├── data/                      # git-ignored
 │   ├── raw/                   # pbp/, schedules/, rosters_weekly/, injuries/, odds/, _manifest.json
-│   ├── interim/
-│   ├── processed/             # feature matrices
-│   └── predictions/           # current_week.json (Contract B), backtest report + predictions
-├── models/                    # trained artifacts (git-ignored)
-├── logs/
-├── notebooks/
-└── tests/
+│   ├── processed/             # features.parquet
+│   └── predictions/           # current_week.json (Contract B), weekly_report_enriched.json (Contract C),
+│                              # week_XX_YYYY_preds.json / week_XX_YYYY_enriched.json archives, backtests
+├── reports/                   # weekly Markdown newsletters (week_XX_YYYY.md)
+├── src/
+│   ├── ingest.py              # nflreadpy + The Odds API -> data/raw (Parquet cache, de-vig)
+│   ├── features.py            # leak-free game-level matrix -> data/processed/features.parquet
+│   ├── model.py               # walk-forward XGBoost + sigmoid calibration + market blend -> Contract B
+│   └── report_generator.py    # Gemini scouting reports + Pydantic validation -> Contract C + newsletter
+└── tests/                     # test_leakage.py (leakage + probability bounds), test_ingest.py, test_model.py, ...
 ```
 
 ## Quickstart
@@ -73,6 +68,31 @@ market = fetch_market_win_probs()  # game_id, market_home_wp, market_away_wp, co
 - Books are combined with the median (configurable), and the result is renormalized so home + away = 1.
 - Games without a moneyline fall back to a win probability implied by the spread, using Normal(μ, σ = 13.45).
 - Every pull is saved to `data/raw/odds/` for closing-line-value analysis.
+
+## Model and weekly predictions
+
+`python -m src.model` runs the walk-forward backtest and then predicts the current week.
+
+- **Walk-forward validation.** To score season S, the model trains on 2016 through S-2, calibrates on S-1 and is scored on S. There is never a random split.
+- **Model.** `XGBClassifier(max_depth=4, learning_rate=0.03, n_estimators=250, subsample=0.8, colsample_bytree=0.8)`, frozen after training and wrapped in `CalibratedClassifierCV(method="sigmoid")`.
+- **Blend.** `final = w·market + (1-w)·model`. The market weight `w` is chosen by `scipy.optimize` to minimize Brier score on cross-fitted probabilities from the calibration season. It starts from 0.60, and 0.60 is the fallback.
+- **Market data.** The current week uses de-vigged Odds API consensus lines, then a saved snapshot, then nflverse lines. History uses nflverse closing lines.
+- **Output.** `data/predictions/current_week.json` (Contract B, schema 1.2.0) holds, per game: the pick, final/model/market win probabilities, `model_edge_pct`, `value_team`, a tier, and the top 3 SHAP drivers. A copy is archived as `data/predictions/week_XX_YYYY_preds.json` so later weeks and seasons never overwrite it.
+- **Tiers.** LOCK means the pick is at least 75% and the model also favors it. VALUE EDGE means the model is at least 8 points above the market on the pick. LEAN means at least 55%. Everything else is a COIN FLIP. The thresholds are set with `NFL_TIER_LOCK_MIN_WIN_PROB`, `NFL_VALUE_EDGE_MIN_PCT` and `NFL_TIER_LEAN_MIN_WIN_PROB`. Each payload records the thresholds it was built with, and the validator checks tiers against those, so archived weeks stay valid when the settings change.
+- **Backtest output.** `data/predictions/backtest_report.json` and `backtest_predictions.parquet`. Pooled out-of-sample Brier for 2018–2026: model 0.233, market 0.211, blend 0.212.
+
+## Scouting reports
+
+`python -m src.report_generator` turns Contract B into prose with Gemini (`google-genai`, default `gemini-2.5-flash`, key `GEMINI_API_KEY`). `--template` skips the LLM.
+
+- **Validation.** Each game's report is checked by a Pydantic model with four required fields: `headline`, `the_pick_summary`, `key_mismatch` and `risk_factor`. It must be plain prose, and it is grounded against that game's fact sheet:
+  - it names the pick, its tier and its final win probability
+  - every percentage comes from the fact sheet
+  - no other team or tier is mentioned
+  - there is no hype or betting language
+- **Retries.** A rejected reply is sent back with the errors, up to 3 attempts. After that the game gets a deterministic template report, flagged in `report_meta`.
+- **Output.** `data/predictions/weekly_report_enriched.json` (Contract C: Contract B plus `report` and `report_meta` per game, re-validated), its archive `data/predictions/week_XX_YYYY_enriched.json`, and the newsletter `reports/week_XX_YYYY.md`.
+- **Exit codes.** 0 ok; 1 error, with nothing written (auth, unknown model, daily quota, bad input); 2 missing API key; 3 written, but no game got a Gemini write-up.
 
 ## Feature matrix
 

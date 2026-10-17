@@ -11,6 +11,11 @@ xgboost>=2.1
 scikit-learn>=1.5
 scipy>=1.11
 
+# LLM reports
+google-genai>=1.20
+pydantic>=2.0
+tzdata>=2024.1
+
 # App
 streamlit>=1.40
 

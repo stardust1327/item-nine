@@ -207,6 +207,20 @@ class Settings:
     # turn a spread into a win probability when a game has no moneyline.
     spread_margin_sigma: float
 
+    # Confidence tiers (Contract B). Stored in each payload, which is validated against its own thresholds.
+    tier_lock_min_win_prob: float  # LOCK: pick's final win probability at least this (and the model favours it)
+    tier_value_edge_min_pct: float  # VALUE EDGE: model at least this many points above the market on the pick
+    tier_lean_min_win_prob: float  # LEAN: pick's final win probability at least this
+
+    # LLM scouting reports (google-genai)
+    gemini_api_key: str | None = field(repr=False)
+    gemini_model: str
+    llm_temperature: float
+    llm_max_attempts: int  # per game, including repair attempts after a validation failure
+    llm_timeout_s: float
+    llm_max_concurrency: int
+    llm_thinking_budget: int | None  # None = model default; 0 disables thinking on 2.5 Flash
+
     # Logging
     log_level: str
 
@@ -230,6 +244,26 @@ class Settings:
     def current_week_json(self) -> Path:
         return self.predictions_dir / "current_week.json"
 
+    @property
+    def enriched_report_json(self) -> Path:
+        return self.predictions_dir / "weekly_report_enriched.json"
+
+    def preds_archive_json(self, season: int, week: int) -> Path:
+        """Versioned Contract B for one week: data/predictions/week_XX_YYYY_preds.json."""
+        return self.predictions_dir / f"week_{week:02d}_{season}_preds.json"
+
+    def enriched_archive_json(self, season: int, week: int) -> Path:
+        """Versioned Contract C for one week: data/predictions/week_XX_YYYY_enriched.json."""
+        return self.predictions_dir / f"week_{week:02d}_{season}_enriched.json"
+
+    def newsletter_md(self, season: int, week: int) -> Path:
+        """Weekly newsletter: reports/week_XX_YYYY.md (season in the name, so seasons never overwrite each other)."""
+        return self.reports_dir / f"week_{week:02d}_{season}.md"
+
+    @property
+    def reports_dir(self) -> Path:
+        return self.project_root / "reports"
+
     def dataset_dir(self, name: str) -> Path:
         return self.raw_dir / name
 
@@ -243,6 +277,7 @@ class Settings:
             self.logs_dir,
             self.odds_dir,
             self.predictions_dir,
+            self.reports_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -261,6 +296,14 @@ class Settings:
         start_season = _env_int("NFL_START_SEASON", 2016)
         if start_season < 1999:
             raise ValueError(f"NFL_START_SEASON must be >= 1999 (first nflverse pbp season), got {start_season}")
+        lock = _env_float("NFL_TIER_LOCK_MIN_WIN_PROB", 0.75)
+        value_edge = _env_float("NFL_VALUE_EDGE_MIN_PCT", 8.0)
+        lean = _env_float("NFL_TIER_LEAN_MIN_WIN_PROB", 0.55)
+        if not (0.5 <= lean <= lock <= 1.0) or not (0.0 < value_edge <= 100.0):
+            raise ValueError(
+                "Tier thresholds need 0.5 <= NFL_TIER_LEAN_MIN_WIN_PROB <= NFL_TIER_LOCK_MIN_WIN_PROB <= 1 "
+                f"and 0 < NFL_VALUE_EDGE_MIN_PCT <= 100; got lean={lean}, lock={lock}, value_edge={value_edge}"
+            )
         weekday = _env_int("NFL_WEEKLY_REFRESH_WEEKDAY", 1)
         hour = _env_int("NFL_WEEKLY_REFRESH_HOUR_UTC", 12)
         if not 0 <= weekday <= 6 or not 0 <= hour <= 23:
@@ -295,6 +338,16 @@ class Settings:
             odds_quota_warn_threshold=_env_int("ODDS_QUOTA_WARN_THRESHOLD", 50),
             odds_consensus_method=method,  # type: ignore[arg-type]
             spread_margin_sigma=_env_float("NFL_SPREAD_MARGIN_SIGMA", 13.45),
+            tier_lock_min_win_prob=lock,
+            tier_value_edge_min_pct=value_edge,
+            tier_lean_min_win_prob=lean,
+            gemini_api_key=_env_str("GEMINI_API_KEY") or _env_str("GOOGLE_API_KEY"),
+            gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash") or "gemini-2.5-flash",
+            llm_temperature=_env_float("LLM_TEMPERATURE", 0.4),
+            llm_max_attempts=max(1, _env_int("LLM_MAX_ATTEMPTS", 3)),
+            llm_timeout_s=_env_float("LLM_TIMEOUT_S", 60.0),
+            llm_max_concurrency=max(1, _env_int("LLM_MAX_CONCURRENCY", 4)),
+            llm_thinking_budget=_env_int("GEMINI_THINKING_BUDGET", -1) if _env_str("GEMINI_THINKING_BUDGET") else None,
             log_level=(_env_str("LOG_LEVEL", "INFO") or "INFO").upper(),
         )
 
@@ -340,6 +393,6 @@ def setup_logging(level: str | int | None = None, *, log_to_file: bool = True, c
         except OSError as exc:  # read-only filesystem, permissions, ...
             root.warning("File logging disabled (%s); logging to console only.", exc)
 
-    for noisy in ("urllib3", "requests"):
+    for noisy in ("urllib3", "requests", "httpx", "httpcore", "google_genai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     _logging_configured = True
