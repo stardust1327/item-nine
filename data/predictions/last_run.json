@@ -1,55 +1,54 @@
 {
   "record": "run",
   "schema_version": "1.0.0",
-  "started_at": "2026-10-17T05:20:21Z",
-  "finished_at": "2026-10-17T05:22:09Z",
+  "started_at": "2026-10-20T13:35:49Z",
+  "finished_at": "2026-10-20T13:41:57Z",
   "options": {
     "season": null,
     "week": null,
-    "use_cached_odds": true,
+    "use_cached_odds": false,
     "skip_llm": false,
     "skip_ingest": false,
-    "backtest": false
+    "backtest": true
   },
   "season": 2026,
-  "week": 6,
+  "week": 7,
   "is_current": true,
-  "exit_code": 0,
-  "status": "ok",
+  "exit_code": 1,
+  "status": "error",
   "degraded": [],
-  "error": null,
+  "error": "report: LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash\nPlease retry in 17h18m41.868967312s.)",
   "stages": [
     {
       "name": "ingest",
       "status": "ok",
-      "seconds": 0.01,
+      "seconds": 6.22,
       "detail": "schedules + pbp 2016-2026"
     },
     {
       "name": "features",
       "status": "ok",
-      "seconds": 0.33,
-      "detail": "3,033 games (192 without a result)"
+      "seconds": 0.19,
+      "detail": "3,033 games (179 without a result)"
+    },
+    {
+      "name": "backtest",
+      "status": "ok",
+      "seconds": 3.8,
+      "detail": "pooled Brier model 0.2330 | market 0.2117 | final 0.2119"
     },
     {
       "name": "model",
       "status": "ok",
-      "seconds": 0.45,
-      "detail": "14 games | market 13 odds_api_snapshot, 1 nflverse_close | tiers 4 LOCK, 2 STAT MISMATCH, 5 LEAN, 3 COIN FLIP"
+      "seconds": 0.72,
+      "detail": "14 games | market 14 odds_api | tiers 1 LOCK, 2 STAT MISMATCH, 9 LEAN, 2 COIN FLIP"
     },
     {
       "name": "report",
-      "status": "ok",
-      "seconds": 106.46,
-      "detail": "13 gemini-3.8-flash / 1 template"
+      "status": "failed",
+      "seconds": 0.0,
+      "detail": "LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash\nPlease retry in 17h18m41.868967312s.)"
     }
   ],
-  "outputs": [
-    "data/processed/features.parquet",
-    "data/predictions/current_week.json",
-    "data/predictions/week_06_2026_preds.json",
-    "data/predictions/weekly_report_enriched.json",
-    "data/predictions/week_06_2026_enriched.json",
-    "reports/week_06_2026.md"
-  ]
+  "outputs": []
 }
