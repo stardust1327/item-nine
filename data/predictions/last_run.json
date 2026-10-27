@@ -1,8 +1,8 @@
 {
   "record": "run",
   "schema_version": "1.0.0",
-  "started_at": "2026-10-23T21:23:23Z",
-  "finished_at": "2026-10-23T21:29:38Z",
+  "started_at": "2026-10-27T13:45:33Z",
+  "finished_at": "2026-10-27T13:51:38Z",
   "options": {
     "season": null,
     "week": null,
@@ -12,42 +12,42 @@
     "backtest": true
   },
   "season": 2026,
-  "week": 7,
+  "week": 8,
   "is_current": true,
   "exit_code": 1,
   "status": "error",
   "degraded": [],
-  "error": "report: LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://ai.google.dev/gemini-api/docs/rate-limits.\nPlease retry in 9h30m21.143794829s.)",
+  "error": "report: LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://ai.google.dev/gemini-api/docs/rate-limits.\nPlease retry in 17h8m21.819555502s.)",
   "stages": [
     {
       "name": "ingest",
       "status": "ok",
-      "seconds": 6.41,
+      "seconds": 5.86,
       "detail": "schedules + pbp 2016-2026"
     },
     {
       "name": "features",
       "status": "ok",
-      "seconds": 0.19,
-      "detail": "3,033 games (178 without a result)"
+      "seconds": 0.17,
+      "detail": "3,033 games (165 without a result)"
     },
     {
       "name": "backtest",
       "status": "ok",
-      "seconds": 3.88,
-      "detail": "pooled Brier model 0.2330 | market 0.2116 | final 0.2119"
+      "seconds": 3.97,
+      "detail": "pooled Brier model 0.2334 | market 0.2118 | final 0.2121"
     },
     {
       "name": "model",
       "status": "ok",
-      "seconds": 0.7,
-      "detail": "14 games | market 13 odds_api, 1 nflverse_close | tiers 1 LOCK, 2 STAT MISMATCH, 9 LEAN, 2 COIN FLIP"
+      "seconds": 0.53,
+      "detail": "14 games | market 14 odds_api | tiers 2 LOCK, 2 STAT MISMATCH, 9 LEAN, 1 COIN FLIP"
     },
     {
       "name": "report",
       "status": "failed",
       "seconds": 0.0,
-      "detail": "LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://ai.google.dev/gemini-api/docs/rate-limits.\nPlease retry in 9h30m21.143794829s.)"
+      "detail": "LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://ai.google.dev/gemini-api/docs/rate-limits.\nPlease retry in 17h8m21.819555502s.)"
     }
   ],
   "outputs": []
