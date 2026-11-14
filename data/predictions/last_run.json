@@ -1,8 +1,8 @@
 {
   "record": "run",
   "schema_version": "1.0.0",
-  "started_at": "2026-11-10T20:18:27Z",
-  "finished_at": "2026-11-10T20:22:58Z",
+  "started_at": "2026-11-14T01:18:04Z",
+  "finished_at": "2026-11-14T01:25:46Z",
   "options": {
     "season": null,
     "week": null,
@@ -17,37 +17,37 @@
   "exit_code": 1,
   "status": "error",
   "degraded": [],
-  "error": "report: LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 11h37m24.485728114s.)",
+  "error": "report: LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 6h34m19.337332293s.)",
   "stages": [
     {
       "name": "ingest",
       "status": "ok",
-      "seconds": 6.18,
+      "seconds": 6.88,
       "detail": "schedules + pbp 2016-2026"
     },
     {
       "name": "features",
       "status": "ok",
-      "seconds": 0.2,
-      "detail": "3,033 games (136 without a result)"
+      "seconds": 0.16,
+      "detail": "3,033 games (135 without a result)"
     },
     {
       "name": "backtest",
       "status": "ok",
-      "seconds": 5.0,
-      "detail": "pooled Brier model 0.2325 | market 0.2110 | final 0.2113"
+      "seconds": 3.68,
+      "detail": "pooled Brier model 0.2326 | market 0.2110 | final 0.2114"
     },
     {
       "name": "model",
       "status": "ok",
-      "seconds": 0.58,
-      "detail": "14 games | market 14 odds_api | tiers 2 LOCK, 2 STAT MISMATCH, 10 LEAN"
+      "seconds": 0.55,
+      "detail": "14 games | market 13 odds_api, 1 nflverse_close | tiers 2 LOCK, 2 STAT MISMATCH, 10 LEAN"
     },
     {
       "name": "report",
       "status": "failed",
       "seconds": 0.0,
-      "detail": "LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 11h37m24.485728114s.)"
+      "detail": "LLMQuotaError: Gemini rejected the request (HTTP 429 RESOURCE_EXHAUSTED: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 6h34m19.337332293s.)"
     }
   ],
   "outputs": []
