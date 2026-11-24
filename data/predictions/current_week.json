@@ -1,9 +1,9 @@
 {
   "contract": "B",
   "schema_version": "1.3.0",
-  "generated_at": "2026-11-21T01:59:22Z",
+  "generated_at": "2026-11-24T22:56:36Z",
   "season": 2026,
-  "week": 11,
+  "week": 12,
   "model": {
     "algorithm": "XGBClassifier + CalibratedClassifierCV(method=\"sigmoid\")",
     "hyperparameters": {
@@ -55,490 +55,135 @@
   },
   "games": [
     {
-      "game_id": "2026_11_IND_HOU",
+      "game_id": "2026_12_GB_LA",
       "season": 2026,
-      "week": 11,
+      "week": 12,
       "game_type": "REG",
-      "kickoff_utc": "2026-11-20T01:15:00Z",
-      "status": "final",
-      "home_team": "HOU",
-      "away_team": "IND",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": true
-      },
-      "net_rest_days": 0,
-      "market": {
-        "home_wp": 0.8481,
-        "away_wp": 0.1519,
-        "home_spread": -12.5,
-        "source": "nflverse_close",
-        "method": "nflverse_moneyline",
-        "books": null,
-        "as_of": null
-      },
-      "model": {
-        "home_wp": 0.7587,
-        "away_wp": 0.2413
-      },
-      "final": {
-        "home_wp": 0.833,
-        "away_wp": 0.167
-      },
-      "pick": {
-        "team": "HOU",
-        "side": "home",
-        "win_prob": 0.833
-      },
-      "model_edge_pct": -8.94,
-      "value_team": "IND",
-      "value_edge_pct": 8.94,
-      "confidence_tier": "LOCK",
-      "top_drivers": [
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": 0.4758,
-          "impact_logit": 0.5292,
-          "favors": "HOU"
-        },
-        {
-          "feature": "away_def_rush_epa_pre",
-          "label": "Away run defense EPA allowed",
-          "value": -0.0049,
-          "impact_logit": 0.1533,
-          "favors": "HOU"
-        },
-        {
-          "feature": "away_off_pass_epa_pre",
-          "label": "Away offense EPA per dropback",
-          "value": -0.242,
-          "impact_logit": 0.1146,
-          "favors": "HOU"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": {
-        "home_score": 26,
-        "away_score": 3
-      }
-    },
-    {
-      "game_id": "2026_11_ARI_KC",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
+      "kickoff_utc": "2026-11-26T01:00:00Z",
       "status": "scheduled",
-      "home_team": "KC",
-      "away_team": "ARI",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": false
-      },
-      "net_rest_days": 0,
-      "market": {
-        "home_wp": 0.9043,
-        "away_wp": 0.0957,
-        "home_spread": -16.25,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.7881,
-        "away_wp": 0.2119
-      },
-      "final": {
-        "home_wp": 0.8847,
-        "away_wp": 0.1153
-      },
-      "pick": {
-        "team": "KC",
-        "side": "home",
-        "win_prob": 0.8847
-      },
-      "model_edge_pct": -11.62,
-      "value_team": "ARI",
-      "value_edge_pct": 11.62,
-      "confidence_tier": "LOCK",
-      "top_drivers": [
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": 0.6855,
-          "impact_logit": 0.4246,
-          "favors": "KC"
-        },
-        {
-          "feature": "diff_early_down_sr",
-          "label": "Early-down success rate edge",
-          "value": 0.0802,
-          "impact_logit": 0.3932,
-          "favors": "KC"
-        },
-        {
-          "feature": "diff_qb_cpoe",
-          "label": "QB CPOE edge",
-          "value": 5.8697,
-          "impact_logit": -0.195,
-          "favors": "ARI"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_BAL_CAR",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
-      "status": "scheduled",
-      "home_team": "CAR",
-      "away_team": "BAL",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": false
-      },
-      "net_rest_days": 1,
-      "market": {
-        "home_wp": 0.5727,
-        "away_wp": 0.4273,
-        "home_spread": -2.5,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.7181,
-        "away_wp": 0.2819
-      },
-      "final": {
-        "home_wp": 0.5972,
-        "away_wp": 0.4028
-      },
-      "pick": {
-        "team": "CAR",
-        "side": "home",
-        "win_prob": 0.5972
-      },
-      "model_edge_pct": 14.54,
-      "value_team": "CAR",
-      "value_edge_pct": 14.54,
-      "confidence_tier": "LEAN",
-      "top_drivers": [
-        {
-          "feature": "home_def_rush_epa_pre",
-          "label": "Home run defense EPA allowed",
-          "value": -0.1911,
-          "impact_logit": 0.36,
-          "favors": "CAR"
-        },
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": -0.077,
-          "impact_logit": -0.2446,
-          "favors": "BAL"
-        },
-        {
-          "feature": "away_off_early_down_sr_pre",
-          "label": "Away early-down success rate",
-          "value": 0.3903,
-          "impact_logit": 0.205,
-          "favors": "CAR"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_JAX_NYG",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
-      "status": "scheduled",
-      "home_team": "NYG",
-      "away_team": "JAX",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": false
-      },
-      "net_rest_days": 3,
-      "market": {
-        "home_wp": 0.3066,
-        "away_wp": 0.6934,
-        "home_spread": 6.0,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.3087,
-        "away_wp": 0.6913
-      },
-      "final": {
-        "home_wp": 0.3069,
-        "away_wp": 0.6931
-      },
-      "pick": {
-        "team": "JAX",
-        "side": "away",
-        "win_prob": 0.6931
-      },
-      "model_edge_pct": -0.21,
-      "value_team": "NYG",
-      "value_edge_pct": 0.21,
-      "confidence_tier": "LEAN",
-      "top_drivers": [
-        {
-          "feature": "diff_early_down_sr",
-          "label": "Early-down success rate edge",
-          "value": -0.0726,
-          "impact_logit": -0.3301,
-          "favors": "JAX"
-        },
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": -0.3309,
-          "impact_logit": -0.2935,
-          "favors": "JAX"
-        },
-        {
-          "feature": "away_def_pass_epa_pre",
-          "label": "Away pass defense EPA allowed",
-          "value": -0.1136,
-          "impact_logit": -0.1468,
-          "favors": "JAX"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_MIA_BUF",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
-      "status": "scheduled",
-      "home_team": "BUF",
-      "away_team": "MIA",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": true
-      },
-      "net_rest_days": 0,
-      "market": {
-        "home_wp": 0.9052,
-        "away_wp": 0.0948,
-        "home_spread": -16.5,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.7682,
-        "away_wp": 0.2318
-      },
-      "final": {
-        "home_wp": 0.882,
-        "away_wp": 0.118
-      },
-      "pick": {
-        "team": "BUF",
-        "side": "home",
-        "win_prob": 0.882
-      },
-      "model_edge_pct": -13.7,
-      "value_team": "MIA",
-      "value_edge_pct": 13.7,
-      "confidence_tier": "LOCK",
-      "top_drivers": [
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": 0.4687,
-          "impact_logit": 0.4246,
-          "favors": "BUF"
-        },
-        {
-          "feature": "diff_early_down_sr",
-          "label": "Early-down success rate edge",
-          "value": 0.1112,
-          "impact_logit": 0.3452,
-          "favors": "BUF"
-        },
-        {
-          "feature": "diff_qb_cpoe",
-          "label": "QB CPOE edge",
-          "value": 6.2936,
-          "impact_logit": -0.2029,
-          "favors": "MIA"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_NO_CHI",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
-      "status": "scheduled",
-      "home_team": "CHI",
-      "away_team": "NO",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": false
-      },
-      "net_rest_days": 7,
-      "market": {
-        "home_wp": 0.8344,
-        "away_wp": 0.1656,
-        "home_spread": -11.5,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.7631,
-        "away_wp": 0.2369
-      },
-      "final": {
-        "home_wp": 0.8223,
-        "away_wp": 0.1777
-      },
-      "pick": {
-        "team": "CHI",
-        "side": "home",
-        "win_prob": 0.8223
-      },
-      "model_edge_pct": -7.13,
-      "value_team": "NO",
-      "value_edge_pct": 7.13,
-      "confidence_tier": "LOCK",
-      "top_drivers": [
-        {
-          "feature": "diff_early_down_sr",
-          "label": "Early-down success rate edge",
-          "value": 0.0876,
-          "impact_logit": 0.4656,
-          "favors": "CHI"
-        },
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": 0.2347,
-          "impact_logit": 0.3993,
-          "favors": "CHI"
-        },
-        {
-          "feature": "diff_qb_cpoe",
-          "label": "QB CPOE edge",
-          "value": 5.4249,
-          "impact_logit": -0.1976,
-          "favors": "NO"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_TB_DET",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
-      "status": "scheduled",
-      "home_team": "DET",
-      "away_team": "TB",
+      "home_team": "LA",
+      "away_team": "GB",
       "venue": {
         "is_neutral_site": false,
         "is_outdoor": false,
         "is_high_wind": false,
         "is_divisional": false
       },
-      "net_rest_days": -7,
+      "net_rest_days": 0,
       "market": {
-        "home_wp": 0.6749,
-        "away_wp": 0.3251,
-        "home_spread": -5.0,
+        "home_wp": 0.5526,
+        "away_wp": 0.4474,
+        "home_spread": -2.5,
         "source": "odds_api",
         "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
       },
       "model": {
-        "home_wp": 0.7061,
-        "away_wp": 0.2939
+        "home_wp": 0.803,
+        "away_wp": 0.197
       },
       "final": {
-        "home_wp": 0.6801,
-        "away_wp": 0.3199
+        "home_wp": 0.5949,
+        "away_wp": 0.4051
       },
       "pick": {
-        "team": "DET",
+        "team": "LA",
         "side": "home",
-        "win_prob": 0.6801
+        "win_prob": 0.5949
       },
-      "model_edge_pct": 3.12,
-      "value_team": "DET",
-      "value_edge_pct": 3.12,
+      "model_edge_pct": 25.04,
+      "value_team": "LA",
+      "value_edge_pct": 25.04,
       "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "home_off_early_down_sr_pre",
+          "label": "Home early-down success rate",
+          "value": 0.5348,
+          "impact_logit": 0.4645,
+          "favors": "LA"
+        },
+        {
+          "feature": "net_rush_epa_mismatch",
+          "label": "Net rushing EPA mismatch",
+          "value": 0.3606,
+          "impact_logit": 0.3315,
+          "favors": "LA"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.1717,
+          "impact_logit": 0.2319,
+          "favors": "LA"
+        }
+      ],
+      "imputed_inputs": [],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_CHI_DET",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-26T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "DET",
+      "away_team": "CHI",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": false,
+        "is_high_wind": false,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.4365,
+        "away_wp": 0.5635,
+        "home_spread": 2.5,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.6908,
+        "away_wp": 0.3092
+      },
+      "final": {
+        "home_wp": 0.4795,
+        "away_wp": 0.5205
+      },
+      "pick": {
+        "team": "CHI",
+        "side": "away",
+        "win_prob": 0.5205
+      },
+      "model_edge_pct": -25.43,
+      "value_team": "DET",
+      "value_edge_pct": 25.43,
+      "confidence_tier": "STAT MISMATCH",
       "top_drivers": [
         {
           "feature": "diff_early_down_sr",
           "label": "Early-down success rate edge",
-          "value": 0.0882,
-          "impact_logit": 0.3815,
+          "value": 0.0795,
+          "impact_logit": 0.51,
           "favors": "DET"
         },
         {
-          "feature": "net_rest_days",
-          "label": "Rest advantage (days)",
-          "value": -7.0,
-          "impact_logit": -0.3482,
-          "favors": "TB"
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.0743,
+          "impact_logit": -0.2782,
+          "favors": "CHI"
         },
         {
-          "feature": "home_def_rush_epa_pre",
-          "label": "Home run defense EPA allowed",
-          "value": -0.171,
-          "impact_logit": 0.2452,
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.194,
+          "impact_logit": 0.2347,
           "favors": "DET"
         }
       ],
@@ -546,67 +191,67 @@
       "result": null
     },
     {
-      "game_id": "2026_11_TEN_DAL",
+      "game_id": "2026_12_PHI_DAL",
       "season": 2026,
-      "week": 11,
+      "week": 12,
       "game_type": "REG",
-      "kickoff_utc": "2026-11-22T18:00:00Z",
+      "kickoff_utc": "2026-11-26T21:30:00Z",
       "status": "scheduled",
       "home_team": "DAL",
-      "away_team": "TEN",
+      "away_team": "PHI",
       "venue": {
         "is_neutral_site": false,
         "is_outdoor": null,
         "is_high_wind": null,
-        "is_divisional": false
+        "is_divisional": true
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.7664,
-        "away_wp": 0.2336,
-        "home_spread": -8.0,
+        "home_wp": 0.7928,
+        "away_wp": 0.2072,
+        "home_spread": -8.5,
         "source": "odds_api",
         "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
       },
       "model": {
-        "home_wp": 0.7878,
-        "away_wp": 0.2122
+        "home_wp": 0.7802,
+        "away_wp": 0.2198
       },
       "final": {
-        "home_wp": 0.77,
-        "away_wp": 0.23
+        "home_wp": 0.7907,
+        "away_wp": 0.2093
       },
       "pick": {
         "team": "DAL",
         "side": "home",
-        "win_prob": 0.77
+        "win_prob": 0.7907
       },
-      "model_edge_pct": 2.14,
-      "value_team": "DAL",
-      "value_edge_pct": 2.14,
+      "model_edge_pct": -1.26,
+      "value_team": "PHI",
+      "value_edge_pct": 1.26,
       "confidence_tier": "LOCK",
       "top_drivers": [
         {
           "feature": "net_pass_epa_mismatch",
           "label": "Net passing EPA mismatch",
-          "value": 0.1781,
-          "impact_logit": 0.4391,
+          "value": 0.2027,
+          "impact_logit": 0.4631,
           "favors": "DAL"
         },
         {
           "feature": "diff_early_down_sr",
           "label": "Early-down success rate edge",
-          "value": 0.0582,
-          "impact_logit": 0.3637,
+          "value": 0.1754,
+          "impact_logit": 0.3804,
           "favors": "DAL"
         },
         {
-          "feature": "away_off_pass_epa_pre",
-          "label": "Away offense EPA per dropback",
-          "value": -0.042,
-          "impact_logit": 0.1466,
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.2301,
+          "impact_logit": 0.234,
           "favors": "DAL"
         }
       ],
@@ -617,275 +262,695 @@
       "result": null
     },
     {
-      "game_id": "2026_11_NYJ_LAC",
+      "game_id": "2026_12_KC_BUF",
       "season": 2026,
-      "week": 11,
+      "week": 12,
       "game_type": "REG",
-      "kickoff_utc": "2026-11-22T21:05:00Z",
+      "kickoff_utc": "2026-11-27T01:20:00Z",
       "status": "scheduled",
-      "home_team": "LAC",
-      "away_team": "NYJ",
+      "home_team": "BUF",
+      "away_team": "KC",
       "venue": {
         "is_neutral_site": false,
-        "is_outdoor": false,
-        "is_high_wind": false,
-        "is_divisional": false
-      },
-      "net_rest_days": -1,
-      "market": {
-        "home_wp": 0.6007,
-        "away_wp": 0.3993,
-        "home_spread": -3.0,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.3218,
-        "away_wp": 0.6782
-      },
-      "final": {
-        "home_wp": 0.5536,
-        "away_wp": 0.4464
-      },
-      "pick": {
-        "team": "LAC",
-        "side": "home",
-        "win_prob": 0.5536
-      },
-      "model_edge_pct": -27.89,
-      "value_team": "NYJ",
-      "value_edge_pct": 27.89,
-      "confidence_tier": "STAT MISMATCH",
-      "top_drivers": [
-        {
-          "feature": "diff_early_down_sr",
-          "label": "Early-down success rate edge",
-          "value": -0.1333,
-          "impact_logit": -0.6502,
-          "favors": "NYJ"
-        },
-        {
-          "feature": "home_off_pass_epa_pre",
-          "label": "Home offense EPA per dropback",
-          "value": -0.1676,
-          "impact_logit": -0.4131,
-          "favors": "NYJ"
-        },
-        {
-          "feature": "home_off_early_down_sr_pre",
-          "label": "Home early-down success rate",
-          "value": 0.3432,
-          "impact_logit": -0.2765,
-          "favors": "NYJ"
-        }
-      ],
-      "imputed_inputs": [],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_LV_DEN",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T21:25:00Z",
-      "status": "scheduled",
-      "home_team": "DEN",
-      "away_team": "LV",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": true
-      },
-      "net_rest_days": 7,
-      "market": {
-        "home_wp": 0.825,
-        "away_wp": 0.175,
-        "home_spread": -10.5,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.7553,
-        "away_wp": 0.2447
-      },
-      "final": {
-        "home_wp": 0.8132,
-        "away_wp": 0.1868
-      },
-      "pick": {
-        "team": "DEN",
-        "side": "home",
-        "win_prob": 0.8132
-      },
-      "model_edge_pct": -6.97,
-      "value_team": "LV",
-      "value_edge_pct": 6.97,
-      "confidence_tier": "LOCK",
-      "top_drivers": [
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": 0.4678,
-          "impact_logit": 0.4759,
-          "favors": "DEN"
-        },
-        {
-          "feature": "diff_early_down_sr",
-          "label": "Early-down success rate edge",
-          "value": 0.0222,
-          "impact_logit": 0.1578,
-          "favors": "DEN"
-        },
-        {
-          "feature": "away_off_pass_epa_pre",
-          "label": "Away offense EPA per dropback",
-          "value": 0.0081,
-          "impact_logit": 0.1415,
-          "favors": "DEN"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_PIT_PHI",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-22T21:25:00Z",
-      "status": "scheduled",
-      "home_team": "PHI",
-      "away_team": "PIT",
-      "venue": {
-        "is_neutral_site": false,
-        "is_outdoor": true,
-        "is_high_wind": null,
-        "is_divisional": false
-      },
-      "net_rest_days": 7,
-      "market": {
-        "home_wp": 0.3592,
-        "away_wp": 0.6408,
-        "home_spread": 4.0,
-        "source": "odds_api",
-        "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
-      },
-      "model": {
-        "home_wp": 0.4894,
-        "away_wp": 0.5106
-      },
-      "final": {
-        "home_wp": 0.3812,
-        "away_wp": 0.6188
-      },
-      "pick": {
-        "team": "PIT",
-        "side": "away",
-        "win_prob": 0.6188
-      },
-      "model_edge_pct": -13.02,
-      "value_team": "PHI",
-      "value_edge_pct": 13.02,
-      "confidence_tier": "LEAN",
-      "top_drivers": [
-        {
-          "feature": "home_off_early_down_sr_pre",
-          "label": "Home early-down success rate",
-          "value": 0.3285,
-          "impact_logit": -0.2724,
-          "favors": "PIT"
-        },
-        {
-          "feature": "net_pass_epa_mismatch",
-          "label": "Net passing EPA mismatch",
-          "value": -0.0248,
-          "impact_logit": -0.2292,
-          "favors": "PIT"
-        },
-        {
-          "feature": "away_off_pass_epa_pre",
-          "label": "Away offense EPA per dropback",
-          "value": -0.0918,
-          "impact_logit": 0.1828,
-          "favors": "PHI"
-        }
-      ],
-      "imputed_inputs": [
-        "is_high_wind_outdoor"
-      ],
-      "result": null
-    },
-    {
-      "game_id": "2026_11_MIN_SF",
-      "season": 2026,
-      "week": 11,
-      "game_type": "REG",
-      "kickoff_utc": "2026-11-23T01:20:00Z",
-      "status": "scheduled",
-      "home_team": "SF",
-      "away_team": "MIN",
-      "venue": {
-        "is_neutral_site": true,
         "is_outdoor": true,
         "is_high_wind": null,
         "is_divisional": false
       },
       "net_rest_days": 0,
       "market": {
-        "home_wp": 0.6065,
-        "away_wp": 0.3935,
-        "home_spread": -3.25,
+        "home_wp": 0.579,
+        "away_wp": 0.421,
+        "home_spread": -3.0,
         "source": "odds_api",
         "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
       },
       "model": {
-        "home_wp": 0.8144,
-        "away_wp": 0.1856
+        "home_wp": 0.5607,
+        "away_wp": 0.4393
       },
       "final": {
-        "home_wp": 0.6416,
-        "away_wp": 0.3584
+        "home_wp": 0.5759,
+        "away_wp": 0.4241
       },
       "pick": {
-        "team": "SF",
+        "team": "BUF",
         "side": "home",
-        "win_prob": 0.6416
+        "win_prob": 0.5759
       },
-      "model_edge_pct": 20.79,
-      "value_team": "SF",
-      "value_edge_pct": 20.79,
+      "model_edge_pct": -1.83,
+      "value_team": "KC",
+      "value_edge_pct": 1.83,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.0729,
+          "impact_logit": 0.2796,
+          "favors": "BUF"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0547,
+          "impact_logit": -0.222,
+          "favors": "KC"
+        },
+        {
+          "feature": "home_def_pass_epa_pre",
+          "label": "Home pass defense EPA allowed",
+          "value": -0.2077,
+          "impact_logit": 0.2088,
+          "favors": "BUF"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_DEN_PIT",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-27T20:00:00Z",
+      "status": "scheduled",
+      "home_team": "PIT",
+      "away_team": "DEN",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.417,
+        "away_wp": 0.583,
+        "home_spread": 3.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.3819,
+        "away_wp": 0.6181
+      },
+      "final": {
+        "home_wp": 0.4111,
+        "away_wp": 0.5889
+      },
+      "pick": {
+        "team": "DEN",
+        "side": "away",
+        "win_prob": 0.5889
+      },
+      "model_edge_pct": 3.51,
+      "value_team": "DEN",
+      "value_edge_pct": 3.51,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.2606,
+          "impact_logit": -0.4268,
+          "favors": "DEN"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": 0.1361,
+          "impact_logit": -0.1634,
+          "favors": "DEN"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0603,
+          "impact_logit": -0.1304,
+          "favors": "DEN"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_ATL_MIN",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "MIN",
+      "away_team": "ATL",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": false,
+        "is_high_wind": false,
+        "is_divisional": false
+      },
+      "net_rest_days": -7,
+      "market": {
+        "home_wp": 0.7335,
+        "away_wp": 0.2665,
+        "home_spread": -7.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.5952,
+        "away_wp": 0.4048
+      },
+      "final": {
+        "home_wp": 0.7102,
+        "away_wp": 0.2898
+      },
+      "pick": {
+        "team": "MIN",
+        "side": "home",
+        "win_prob": 0.7102
+      },
+      "model_edge_pct": -13.83,
+      "value_team": "ATL",
+      "value_edge_pct": 13.83,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.0741,
+          "impact_logit": 0.2167,
+          "favors": "MIN"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0153,
+          "impact_logit": -0.1404,
+          "favors": "ATL"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": -0.1346,
+          "impact_logit": -0.1267,
+          "favors": "ATL"
+        }
+      ],
+      "imputed_inputs": [],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_BAL_HOU",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "HOU",
+      "away_team": "BAL",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": null,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 3,
+      "market": {
+        "home_wp": 0.7322,
+        "away_wp": 0.2678,
+        "home_spread": -6.5,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.7514,
+        "away_wp": 0.2486
+      },
+      "final": {
+        "home_wp": 0.7354,
+        "away_wp": 0.2646
+      },
+      "pick": {
+        "team": "HOU",
+        "side": "home",
+        "win_prob": 0.7354
+      },
+      "model_edge_pct": 1.92,
+      "value_team": "HOU",
+      "value_edge_pct": 1.92,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.3227,
+          "impact_logit": 0.5481,
+          "favors": "HOU"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": -0.042,
+          "impact_logit": 0.1101,
+          "favors": "HOU"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.1775,
+          "impact_logit": 0.1093,
+          "favors": "HOU"
+        }
+      ],
+      "imputed_inputs": [
+        "is_outdoor",
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_NO_CIN",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "CIN",
+      "away_team": "NO",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": -1,
+      "market": {
+        "home_wp": 0.822,
+        "away_wp": 0.178,
+        "home_spread": -10.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.8454,
+        "away_wp": 0.1546
+      },
+      "final": {
+        "home_wp": 0.8259,
+        "away_wp": 0.1741
+      },
+      "pick": {
+        "team": "CIN",
+        "side": "home",
+        "win_prob": 0.8259
+      },
+      "model_edge_pct": 2.34,
+      "value_team": "CIN",
+      "value_edge_pct": 2.34,
+      "confidence_tier": "LOCK",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.4241,
+          "impact_logit": 0.5237,
+          "favors": "CIN"
+        },
+        {
+          "feature": "home_off_early_down_sr_pre",
+          "label": "Home early-down success rate",
+          "value": 0.5468,
+          "impact_logit": 0.5232,
+          "favors": "CIN"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": 0.157,
+          "impact_logit": 0.3564,
+          "favors": "CIN"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_NYG_IND",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "IND",
+      "away_team": "NYG",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": null,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 3,
+      "market": {
+        "home_wp": 0.2678,
+        "away_wp": 0.7322,
+        "home_spread": 6.5,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.527,
+        "away_wp": 0.473
+      },
+      "final": {
+        "home_wp": 0.3116,
+        "away_wp": 0.6884
+      },
+      "pick": {
+        "team": "NYG",
+        "side": "away",
+        "win_prob": 0.6884
+      },
+      "model_edge_pct": -25.92,
+      "value_team": "IND",
+      "value_edge_pct": 25.92,
       "confidence_tier": "STAT MISMATCH",
       "top_drivers": [
         {
           "feature": "net_pass_epa_mismatch",
           "label": "Net passing EPA mismatch",
-          "value": 0.3425,
-          "impact_logit": 0.6341,
-          "favors": "SF"
+          "value": -0.4197,
+          "impact_logit": -0.2978,
+          "favors": "NYG"
+        },
+        {
+          "feature": "away_off_early_down_sr_pre",
+          "label": "Away early-down success rate",
+          "value": 0.4024,
+          "impact_logit": 0.2509,
+          "favors": "IND"
         },
         {
           "feature": "home_off_pass_epa_pre",
           "label": "Home offense EPA per dropback",
-          "value": 0.3584,
-          "impact_logit": 0.2568,
+          "value": -0.2379,
+          "impact_logit": 0.1499,
+          "favors": "IND"
+        }
+      ],
+      "imputed_inputs": [
+        "is_outdoor",
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_NYJ_MIA",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "MIA",
+      "away_team": "NYJ",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.3571,
+        "away_wp": 0.6429,
+        "home_spread": 3.5,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.2961,
+        "away_wp": 0.7039
+      },
+      "final": {
+        "home_wp": 0.3468,
+        "away_wp": 0.6532
+      },
+      "pick": {
+        "team": "NYJ",
+        "side": "away",
+        "win_prob": 0.6532
+      },
+      "model_edge_pct": 6.1,
+      "value_team": "NYJ",
+      "value_edge_pct": 6.1,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.1417,
+          "impact_logit": -0.684,
+          "favors": "NYJ"
+        },
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.0225,
+          "impact_logit": -0.2172,
+          "favors": "NYJ"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": -0.1337,
+          "impact_logit": -0.1261,
+          "favors": "NYJ"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_TEN_JAX",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T18:00:00Z",
+      "status": "scheduled",
+      "home_team": "JAX",
+      "away_team": "TEN",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.887,
+        "away_wp": 0.113,
+        "home_spread": -14.5,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.6838,
+        "away_wp": 0.3162
+      },
+      "final": {
+        "home_wp": 0.8526,
+        "away_wp": 0.1474
+      },
+      "pick": {
+        "team": "JAX",
+        "side": "home",
+        "win_prob": 0.8526
+      },
+      "model_edge_pct": -20.32,
+      "value_team": "TEN",
+      "value_edge_pct": 20.32,
+      "confidence_tier": "LOCK",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.5976,
+          "impact_logit": 0.3846,
+          "favors": "JAX"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": -0.0071,
+          "impact_logit": 0.1405,
+          "favors": "JAX"
+        },
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": 0.1854,
+          "impact_logit": 0.1298,
+          "favors": "JAX"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_NE_LAC",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T21:05:00Z",
+      "status": "scheduled",
+      "home_team": "LAC",
+      "away_team": "NE",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": false,
+        "is_high_wind": false,
+        "is_divisional": false
+      },
+      "net_rest_days": -7,
+      "market": {
+        "home_wp": 0.5089,
+        "away_wp": 0.4911,
+        "home_spread": -1.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.3885,
+        "away_wp": 0.6115
+      },
+      "final": {
+        "home_wp": 0.4886,
+        "away_wp": 0.5114
+      },
+      "pick": {
+        "team": "NE",
+        "side": "away",
+        "win_prob": 0.5114
+      },
+      "model_edge_pct": 12.04,
+      "value_team": "NE",
+      "value_edge_pct": 12.04,
+      "confidence_tier": "COIN FLIP",
+      "top_drivers": [
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.1271,
+          "impact_logit": -0.2938,
+          "favors": "NE"
+        },
+        {
+          "feature": "away_off_pass_epa_pre",
+          "label": "Away offense EPA per dropback",
+          "value": 0.0778,
+          "impact_logit": -0.1201,
+          "favors": "NE"
+        },
+        {
+          "feature": "net_rest_days",
+          "label": "Rest advantage (days)",
+          "value": -7.0,
+          "impact_logit": -0.0983,
+          "favors": "NE"
+        }
+      ],
+      "imputed_inputs": [],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_SEA_SF",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-29T21:25:00Z",
+      "status": "scheduled",
+      "home_team": "SF",
+      "away_team": "SEA",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": -7,
+      "market": {
+        "home_wp": 0.614,
+        "away_wp": 0.386,
+        "home_spread": -3.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.6438,
+        "away_wp": 0.3562
+      },
+      "final": {
+        "home_wp": 0.6191,
+        "away_wp": 0.3809
+      },
+      "pick": {
+        "team": "SF",
+        "side": "home",
+        "win_prob": 0.6191
+      },
+      "model_edge_pct": 2.98,
+      "value_team": "SF",
+      "value_edge_pct": 2.98,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "home_off_early_down_sr_pre",
+          "label": "Home early-down success rate",
+          "value": 0.5413,
+          "impact_logit": 0.5438,
           "favors": "SF"
+        },
+        {
+          "feature": "net_rest_days",
+          "label": "Rest advantage (days)",
+          "value": -7.0,
+          "impact_logit": -0.3942,
+          "favors": "SEA"
         },
         {
           "feature": "diff_early_down_sr",
           "label": "Early-down success rate edge",
-          "value": 0.1364,
-          "impact_logit": 0.2544,
+          "value": 0.0885,
+          "impact_logit": 0.3288,
           "favors": "SF"
         }
       ],
@@ -895,68 +960,209 @@
       "result": null
     },
     {
-      "game_id": "2026_11_CIN_WAS",
+      "game_id": "2026_12_WAS_ARI",
       "season": 2026,
-      "week": 11,
+      "week": 12,
       "game_type": "REG",
-      "kickoff_utc": "2026-11-24T01:15:00Z",
+      "kickoff_utc": "2026-11-29T21:25:00Z",
       "status": "scheduled",
-      "home_team": "WAS",
-      "away_team": "CIN",
+      "home_team": "ARI",
+      "away_team": "WAS",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": null,
+        "is_high_wind": null,
+        "is_divisional": false
+      },
+      "net_rest_days": 1,
+      "market": {
+        "home_wp": 0.2441,
+        "away_wp": 0.7559,
+        "home_spread": 7.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.292,
+        "away_wp": 0.708
+      },
+      "final": {
+        "home_wp": 0.2522,
+        "away_wp": 0.7478
+      },
+      "pick": {
+        "team": "WAS",
+        "side": "away",
+        "win_prob": 0.7478
+      },
+      "model_edge_pct": -4.79,
+      "value_team": "ARI",
+      "value_edge_pct": 4.79,
+      "confidence_tier": "LEAN",
+      "top_drivers": [
+        {
+          "feature": "home_def_pass_epa_pre",
+          "label": "Home pass defense EPA allowed",
+          "value": 0.3362,
+          "impact_logit": -0.3833,
+          "favors": "WAS"
+        },
+        {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": -0.4077,
+          "impact_logit": -0.371,
+          "favors": "WAS"
+        },
+        {
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0622,
+          "impact_logit": -0.1401,
+          "favors": "WAS"
+        }
+      ],
+      "imputed_inputs": [
+        "is_outdoor",
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_LV_CLE",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-11-30T01:20:00Z",
+      "status": "scheduled",
+      "home_team": "CLE",
+      "away_team": "LV",
       "venue": {
         "is_neutral_site": false,
         "is_outdoor": true,
         "is_high_wind": null,
         "is_divisional": false
       },
-      "net_rest_days": 3,
+      "net_rest_days": 7,
       "market": {
-        "home_wp": 0.2845,
-        "away_wp": 0.7155,
-        "home_spread": 6.0,
+        "home_wp": 0.666,
+        "away_wp": 0.334,
+        "home_spread": -4.5,
         "source": "odds_api",
         "method": "h2h",
-        "books": 6,
-        "as_of": "2026-11-21T01:59:22Z"
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
       },
       "model": {
-        "home_wp": 0.3633,
-        "away_wp": 0.6367
+        "home_wp": 0.6957,
+        "away_wp": 0.3043
       },
       "final": {
-        "home_wp": 0.2978,
-        "away_wp": 0.7022
+        "home_wp": 0.671,
+        "away_wp": 0.329
       },
       "pick": {
-        "team": "CIN",
-        "side": "away",
-        "win_prob": 0.7022
+        "team": "CLE",
+        "side": "home",
+        "win_prob": 0.671
       },
-      "model_edge_pct": -7.88,
-      "value_team": "WAS",
-      "value_edge_pct": 7.88,
+      "model_edge_pct": 2.97,
+      "value_team": "CLE",
+      "value_edge_pct": 2.97,
       "confidence_tier": "LEAN",
       "top_drivers": [
         {
+          "feature": "net_pass_epa_mismatch",
+          "label": "Net passing EPA mismatch",
+          "value": 0.2889,
+          "impact_logit": 0.6041,
+          "favors": "CLE"
+        },
+        {
+          "feature": "away_def_rush_epa_pre",
+          "label": "Away run defense EPA allowed",
+          "value": 0.0319,
+          "impact_logit": -0.2866,
+          "favors": "LV"
+        },
+        {
           "feature": "diff_early_down_sr",
           "label": "Early-down success rate edge",
-          "value": -0.1088,
-          "impact_logit": -0.5046,
-          "favors": "CIN"
+          "value": 0.0259,
+          "impact_logit": 0.1638,
+          "favors": "CLE"
+        }
+      ],
+      "imputed_inputs": [
+        "is_high_wind_outdoor"
+      ],
+      "result": null
+    },
+    {
+      "game_id": "2026_12_CAR_TB",
+      "season": 2026,
+      "week": 12,
+      "game_type": "REG",
+      "kickoff_utc": "2026-12-01T01:15:00Z",
+      "status": "scheduled",
+      "home_team": "TB",
+      "away_team": "CAR",
+      "venue": {
+        "is_neutral_site": false,
+        "is_outdoor": true,
+        "is_high_wind": null,
+        "is_divisional": true
+      },
+      "net_rest_days": 0,
+      "market": {
+        "home_wp": 0.583,
+        "away_wp": 0.417,
+        "home_spread": -3.0,
+        "source": "odds_api",
+        "method": "h2h",
+        "books": 5,
+        "as_of": "2026-11-24T22:56:36Z"
+      },
+      "model": {
+        "home_wp": 0.3808,
+        "away_wp": 0.6192
+      },
+      "final": {
+        "home_wp": 0.5488,
+        "away_wp": 0.4512
+      },
+      "pick": {
+        "team": "TB",
+        "side": "home",
+        "win_prob": 0.5488
+      },
+      "model_edge_pct": -20.22,
+      "value_team": "CAR",
+      "value_edge_pct": 20.22,
+      "confidence_tier": "COIN FLIP",
+      "top_drivers": [
+        {
+          "feature": "home_off_pass_epa_pre",
+          "label": "Home offense EPA per dropback",
+          "value": -0.1451,
+          "impact_logit": -0.6041,
+          "favors": "CAR"
         },
         {
           "feature": "net_pass_epa_mismatch",
           "label": "Net passing EPA mismatch",
-          "value": -0.425,
-          "impact_logit": -0.2617,
-          "favors": "CIN"
+          "value": 0.1495,
+          "impact_logit": 0.2311,
+          "favors": "TB"
         },
         {
-          "feature": "away_off_early_down_sr_pre",
-          "label": "Away early-down success rate",
-          "value": 0.5557,
-          "impact_logit": -0.109,
-          "favors": "CIN"
+          "feature": "diff_early_down_sr",
+          "label": "Early-down success rate edge",
+          "value": -0.0269,
+          "impact_logit": -0.183,
+          "favors": "CAR"
         }
       ],
       "imputed_inputs": [
